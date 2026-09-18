@@ -1,0 +1,19 @@
+evaluation:
+  warmup_runs: 1
+  measured_runs: 30
+  time_unit: nanoseconds
+  tie_tolerance: 1.0e-9
+
+  design_paths:
+    - src/vision2dxf/designs/formula_based
+    - src/vision2dxf/designs/parametric_block
+    - src/vision2dxf/designs/template_grading
+
+sensitivity:
+  criteria_order:
+    - economic
+    - usability
+    - performance
+    - reliability
+    - maintainability
+  loi_values: [10, 9, 8, 7, 6]

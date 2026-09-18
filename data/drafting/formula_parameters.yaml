@@ -1,0 +1,44 @@
+units: cm
+source: team_created
+status: prototype_only
+description: Formula constants and ease settings for Design A front-bodice drafting
+
+ease_defaults:
+  chest: 4.0
+  waist: 2.0
+  hip: 2.0
+
+# Fraction-based formulas for front bodice landmarks
+# All values are proportions applied to measurements
+formulas:
+  neckline_width:
+    base: 0.08
+    additive: chest
+  neckline_depth:
+    base: 0.075
+    additive: chest
+  shoulder_slope:
+    ratio: 0.05
+  shoulder_length:
+    fraction: 0.30
+    of: shoulder
+  armhole_depth:
+    fraction: 0.50
+    of: armhole_depth
+  front_bust_width:
+    fraction: 0.25
+    additive: chest
+    ease_factor: true
+  waist_width:
+    fraction: 0.25
+    additive: waist
+    ease_factor: true
+  dart_width:
+    fraction: 0.04
+    of: waist
+  dart_length:
+    fraction: 0.10
+    of: torso_length
+  side_seam_length:
+    fraction: 0.50
+    of: torso_length

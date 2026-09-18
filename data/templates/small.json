@@ -1,0 +1,47 @@
+{
+  "pattern_id": "small",
+  "units": "cm",
+  "status": "prototype_only",
+  "source": "team_created",
+  "reference_measurements": {
+    "chest": 84.0,
+    "waist": 68.0,
+    "hip": 90.0,
+    "shoulder": 36.0,
+    "torso_length": 39.0,
+    "armhole_depth": 20.0,
+    "sleeve_length": 55.0,
+    "ease": 4.0
+  },
+  "points": {
+    "center_front_neck": [0.0, 0.0],
+    "side_neck": [6.8, 0.0],
+    "shoulder_tip": [17.8, 3.2],
+    "armhole_bottom": [22.0, 20.0],
+    "side_waist": [22.0, 39.0],
+    "center_front_waist": [0.0, 39.0],
+    "dart_leg_inner": [9.0, 39.0],
+    "dart_leg_outer": [12.6, 39.0],
+    "dart_tip": [10.8, 30.0]
+  },
+  "segments": [
+    {"type": "line", "from": "center_front_neck", "to": "side_neck"},
+    {"type": "line", "from": "side_neck", "to": "shoulder_tip"},
+    {"type": "curve", "from": "shoulder_tip", "to": "armhole_bottom", "control_points": [[23.0, 9.0], [24.0, 16.0]]},
+    {"type": "line", "from": "armhole_bottom", "to": "side_waist"},
+    {"type": "line", "from": "side_waist", "to": "center_front_waist"},
+    {"type": "line", "from": "dart_leg_inner", "to": "dart_tip"},
+    {"type": "line", "from": "dart_tip", "to": "dart_leg_outer"}
+  ],
+  "grading_limits": {
+    "center_front_neck": {"x": [-1.0, 1.0], "y": [-1.0, 1.0]},
+    "side_neck": {"x": [-1.0, 1.0], "y": [-1.0, 1.0]},
+    "shoulder_tip": {"x": [-2.0, 2.0], "y": [-1.5, 1.5]},
+    "armhole_bottom": {"x": [-2.0, 2.0], "y": [-2.0, 2.0]},
+    "side_waist": {"x": [-2.0, 2.0], "y": [-2.0, 2.0]},
+    "center_front_waist": {"x": [-1.0, 1.0], "y": [-2.0, 2.0]},
+    "dart_leg_inner": {"x": [-1.5, 1.5], "y": [-1.0, 1.0]},
+    "dart_leg_outer": {"x": [-1.5, 1.5], "y": [-1.0, 1.0]},
+    "dart_tip": {"x": [-1.5, 1.5], "y": [-1.5, 1.5]}
+  }
+}

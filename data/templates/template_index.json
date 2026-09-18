@@ -1,0 +1,34 @@
+{
+  "units": "cm",
+  "source": "team_created",
+  "status": "prototype_only",
+  "templates": [
+    {
+      "id": "small",
+      "file": "small.json",
+      "reference_measurements": {
+        "chest": 84.0,
+        "waist": 68.0,
+        "hip": 90.0
+      }
+    },
+    {
+      "id": "medium",
+      "file": "medium.json",
+      "reference_measurements": {
+        "chest": 92.0,
+        "waist": 76.0,
+        "hip": 98.0
+      }
+    },
+    {
+      "id": "large",
+      "file": "large.json",
+      "reference_measurements": {
+        "chest": 100.0,
+        "waist": 84.0,
+        "hip": 106.0
+      }
+    }
+  ]
+}

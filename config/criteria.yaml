@@ -1,0 +1,30 @@
+criteria:
+  economic:
+    metric: halstead_program_volume
+    unit: bits
+    direction: minimize
+    source: radon
+
+  usability:
+    metric: mean_sus_score
+    unit: score_0_100
+    direction: maximize
+    source: participant
+
+  performance:
+    metric: median_generation_time_ms
+    unit: milliseconds
+    direction: minimize
+    source: benchmark
+
+  reliability:
+    metric: failure_rate_percent
+    unit: percent
+    direction: minimize
+    source: test_suite
+
+  maintainability:
+    metric: maintainability_index
+    unit: score_0_100
+    direction: maximize
+    source: radon
