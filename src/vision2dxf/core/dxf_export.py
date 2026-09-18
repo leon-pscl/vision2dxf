@@ -40,7 +40,7 @@ def export_dxf(result: PatternResult, path: str | Path) -> Path | None:
             if len(ctrl) >= 2:
                 pts = [fr] + ctrl + [to]
                 fit_pts = [(p[0], p[1]) for p in pts]
-                msp.add_spline_fit(fit_pts)
+                msp.add_spline(fit_points=fit_pts)
             else:
                 msp.add_line(fr, to)
         else:

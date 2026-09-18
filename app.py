@@ -7,23 +7,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 import streamlit as st
 import pandas as pd
 import json
-import yaml
-import io
 
 from vision2dxf.core.models import MeasurementProfile
-from vision2dxf.core.interfaces import load_profiles, load_json
+from vision2dxf.core.interfaces import load_profiles
 from vision2dxf.core.validation import validate_pattern
 from vision2dxf.core.preview import render_preview
 from vision2dxf.core.dxf_export import export_json, export_dxf
 from vision2dxf.designs.formula_based.generator import FormulaBasedGenerator
 from vision2dxf.designs.parametric_block.generator import ParametricBlockGenerator
 from vision2dxf.designs.template_grading.generator import TemplateGradingGenerator
-from vision2dxf.evaluation.benchmark import benchmark_generator
-from vision2dxf.evaluation.reliability import measure_reliability
 from vision2dxf.evaluation.code_metrics import measure_code_metrics
-from vision2dxf.sensitivity.normalize import normalize_matrix
-from vision2dxf.sensitivity.score import compute_scores
-from vision2dxf.sensitivity.summarize import summarize_robustness, generate_recommendation
 
 st.set_page_config(page_title="Vision2DXF", layout="wide")
 
@@ -34,7 +27,12 @@ GENERATORS = {
 }
 
 PROFILES_PATH = Path("config/test_profiles.json")
-CRITERIA_PATH = Path("config/criteria.yaml")
+
+DESIGN_PATHS = [
+    "src/vision2dxf/designs/formula_based",
+    "src/vision2dxf/designs/parametric_block",
+    "src/vision2dxf/designs/template_grading",
+]
 
 
 def _load_profiles_cached():
@@ -155,94 +153,24 @@ def tab_compare():
 def tab_evaluate():
     st.header("Evaluate")
 
-    profiles = _load_profiles_cached()
-    if not profiles:
-        st.warning("No profiles")
-        return
-
-    warmup = st.number_input("Warmup runs", min_value=1, value=1)
-    reps = st.number_input("Measured runs", min_value=5, value=30)
-
     if st.button("Run Evaluation"):
-        with st.spinner("Running benchmark..."):
-            perf_results = []
-            rel_results = []
-            for name, gen in GENERATORS.items():
-                perf_results.extend(benchmark_generator(gen, profiles, warmup, reps))
-                rel_results.extend(measure_reliability(gen, profiles))
+        with st.spinner("Running code analysis..."):
+            code_met = measure_code_metrics(DESIGN_PATHS)
 
-            design_paths = [
-                "src/vision2dxf/designs/formula_based",
-                "src/vision2dxf/designs/parametric_block",
-                "src/vision2dxf/designs/template_grading",
-            ]
-            code_met = measure_code_metrics(design_paths)
+        st.subheader("Raw Constraint Values")
 
-        st.subheader("Performance")
-        perf_rows = []
-        for r in perf_results:
-            perf_rows.append({
-                "Design": r["design_id"],
-                "Profile": r["profile_id"],
-                "Median (ms)": round(r["median_ms"], 3),
-            })
-        st.dataframe(pd.DataFrame(perf_rows), hide_index=True)
+        out_path = Path("outputs/raw/raw_constraint_values.csv")
+        if out_path.exists():
+            raw_df = pd.read_csv(out_path, index_col=0)
+            st.dataframe(raw_df, use_container_width=True)
+        else:
+            st.info("Evaluation did not produce output. Check logs.")
 
-        st.subheader("Reliability")
-        rel_rows = []
-        for r in rel_results:
-            rel_rows.append({
-                "Design": r["design_id"],
-                "Profile": r["profile_id"],
-                "Failures": r["failures"],
-                "Failure %": round(r["failure_rate_percent"], 2),
-            })
-        st.dataframe(pd.DataFrame(rel_rows), hide_index=True)
-
-        st.subheader("Code Metrics")
+        st.subheader("Code Metrics Detail")
         st.dataframe(pd.DataFrame(code_met), hide_index=True)
 
-        st.subheader("SUS Status")
-        st.info("Pending — no participant data collected.")
 
-
-def tab_sensitivity():
-    st.header("Sensitivity Analysis")
-
-    raw_path = Path("outputs/raw/raw_constraint_values.csv")
-    if not raw_path.exists():
-        st.info("Run Evaluate first to generate raw constraint values.")
-        return
-
-    raw_df = pd.read_csv(raw_path, index_col=0)
-    criteria_cfg = yaml.safe_load(open(CRITERIA_PATH))["criteria"]
-    directions = {k: v["direction"] for k, v in criteria_cfg.items()}
-
-    norm_df, missing = compute_scores(raw_df, directions)
-
-    design_ids = [c.replace("score_", "") for c in norm_df.columns if c.startswith("score_")]
-    robust = summarize_robustness(norm_df, design_ids)
-
-    st.subheader("Normalized Ratings")
-    norm_display = norm_df[[c for c in norm_df.columns if c.startswith("score_")]].copy()
-    norm_display.columns = [c.replace("score_", "") for c in norm_display.columns]
-    st.dataframe(norm_display.describe().round(2), use_container_width=True)
-
-    st.subheader("Design Robustness")
-    st.dataframe(robust, hide_index=True, use_container_width=True)
-
-    st.subheader("Win Distribution")
-    st.bar_chart(robust.set_index("design_id")["outright_wins"])
-
-    rec = generate_recommendation(robust, raw_df.to_dict(orient="index"), list(raw_df.columns))
-    st.subheader("Recommendation")
-    if rec:
-        st.json(rec)
-    else:
-        st.warning("Missing required criterion values (e.g. SUS). Cannot generate recommendation.")
-
-
-tabs = st.tabs(["Generate", "Compare", "Evaluate", "Sensitivity"])
+tabs = st.tabs(["Generate", "Compare", "Evaluate"])
 
 with tabs[0]:
     tab_generate()
@@ -250,5 +178,3 @@ with tabs[1]:
     tab_compare()
 with tabs[2]:
     tab_evaluate()
-with tabs[3]:
-    tab_sensitivity()
