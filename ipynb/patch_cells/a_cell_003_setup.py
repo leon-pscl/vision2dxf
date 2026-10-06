@@ -67,6 +67,10 @@ def resolve_paths() -> Dict[str, Path]:
     artifacts = working / "artifacts"
     for p in (src, export, artifacts):
         p.mkdir(parents=True, exist_ok=True)
+    # A stale copy here would be imported in preference to the module the %%writefile cell is
+    # about to emit, which silently runs the wrong code. Clearing it costs one mkdir.
+    for stale in src.glob("*.py"):
+        stale.unlink()
     return {"working": working, "src": src, "export": export, "artifacts": artifacts}
 
 

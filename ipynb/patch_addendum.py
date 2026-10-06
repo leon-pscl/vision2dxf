@@ -59,6 +59,7 @@ REPLACE: Dict[int, str] = {
 INSERT_AFTER: List[Tuple[int, str]] = [
     (0, "a_md_000_header.md"),
     (3, "a_cell_004_runstate.py"),
+    (3, "a_cell_004b_phase_wrap.py"),
     (5, "a_md_005_resume.md"),
     (5, "a_cell_005_resume_state.py"),
     (54, "a_md_055_determinism.md"),
@@ -69,39 +70,46 @@ INSERT_AFTER: List[Tuple[int, str]] = [
 
 DELETE: Tuple[int, ...] = ()
 
-#: Modules written into the notebook by a `%%writefile` cell. They live here as ordinary Python
+#: Modules written into the notebook by `%%writefile` cells. They live here as ordinary Python
 #: files so they can be imported, linted and unit-tested outside the notebook; this script inlines
-#: them into the generated cell. Editing ``patch_cells/a_cell_004_runstate.py`` directly is
-#: therefore wrong - edit these two and re-run the patcher.
+#: each into its own cell. Editing the generated ``a_cell_00*_runstate.py`` / ``a_cell_005*_wrap.py``
+#: directly is therefore wrong - edit these and re-run the patcher.
+#:
+#: One module per cell, deliberately. ``%%writefile`` is a *cell* magic: a second directive in the
+#: same cell is not honoured, it is written into the first file as a comment. Putting both modules
+#: in one cell therefore produced a run_state.py with phase_wrap's body glued to it, and the
+#: embedded ``import run_state as R`` then failed with a self-import ModuleNotFoundError.
 WRITE_MODULES: Dict[str, str] = {
     "run_state.py": "a_cell_004_runstate.py",
-    "phase_wrap.py": "a_cell_004_runstate.py",
+    "phase_wrap.py": "a_cell_004b_phase_wrap.py",
 }
 
 
-def build_writefile_cell() -> str:
-    """Compose the cell that emits `src/run_state.py` and `src/phase_wrap.py`.
+def build_writefile_cell(module: str) -> str:
+    """Compose the single `%%writefile` cell that emits one `src/` module.
 
-    Both modules are kept as real files here so they can be imported, linted and unit-tested
+    The modules are kept as real files here so they can be imported, linted and unit-tested
     outside the notebook. This function is the only place that inlines them.
+
+    Parameters
+    ----------
+    module : str
+        Filename under ``patch_cells/``, e.g. ``'run_state.py'``.
 
     Returns
     -------
     str
-        A cell body of two `%%writefile` blocks.
+        A cell body of one `%%writefile` block.
 
     Raises
     ------
     FileNotFoundError
-        If either module is absent.
+        If the module source is absent.
     """
-    parts = []
-    for module in ("run_state.py", "phase_wrap.py"):
-        p = SRC_DIR / module
-        if not p.is_file():
-            raise FileNotFoundError(f"missing module source: {p}")
-        parts.append(f"# %%writefile src/{module}\n" + p.read_text(encoding="utf-8-sig"))
-    return "\n\n".join(parts)
+    p = SRC_DIR / module
+    if not p.is_file():
+        raise FileNotFoundError(f"missing module source: {p}")
+    return f"# %%writefile src/{module}\n" + p.read_text(encoding="utf-8-sig")
 
 
 def read_source(name: str) -> str:
@@ -143,6 +151,25 @@ def to_lines(text: str) -> List[str]:
     return text.splitlines(keepends=True)
 
 
+def module_for(name: str) -> str:
+    """Return the module source inlined into a patch-source filename, or "" if none.
+
+    Parameters
+    ----------
+    name : str
+        Patch source filename, possibly a ``WRITE_MODULES`` target.
+
+    Returns
+    -------
+    str
+        The module filename, or an empty string when ``name`` is a plain source file.
+    """
+    for module, target in WRITE_MODULES.items():
+        if target == name:
+            return module
+    return ""
+
+
 def make_cell(name: str) -> dict:
     """Build a notebook cell of the right type from a patch source.
 
@@ -157,8 +184,8 @@ def make_cell(name: str) -> dict:
         A cell dict valid for nbformat 4.
     """
     # the %%writefile cell is composed from the module sources, never read from disk
-    text = (build_writefile_cell() if name in WRITE_MODULES.values()
-            else read_source(name))
+    mod = module_for(name)
+    text = build_writefile_cell(mod) if mod else read_source(name)
     lines = to_lines(text)
     # nbformat requires cell ids to match ^[a-zA-Z0-9-_]+$, so the extension is dropped here.
     cid = f"a-{Path(name).stem}"
@@ -180,10 +207,10 @@ def validate() -> List[str]:
     items = list(REPLACE.items()) + INSERT_AFTER
     for idx, name in sorted(items, key=lambda kv: (kv[1], kv[0])):
         if name in WRITE_MODULES.values():
-            # composed from the module sources; validated through read_source on each module below
-            for module in WRITE_MODULES:
-                if not (SRC_DIR / module).is_file():
-                    problems.append(f"cell {idx}: missing module source {module}")
+            # composed from the module source; validated when that module is inlined
+            module = module_for(name)
+            if not (SRC_DIR / module).is_file():
+                problems.append(f"cell {idx}: missing module source {module}")
             continue
         if not (SRC_DIR / name).is_file():
             problems.append(f"cell {idx}: missing source {name}")
@@ -197,6 +224,21 @@ def validate() -> List[str]:
         except SyntaxError as exc:
             problems.append(f"{name} (cell {idx}): line {exc.lineno}: {exc.msg}")
     return problems
+
+
+def _by_id_repairs() -> List[Tuple[str, str]]:
+    """Sources that can be re-applied by cell id, which survives insertions.
+
+    Only the ``%%writefile`` cells qualify: they are self-contained, so rewriting one cannot
+    clobber a neighbouring cell the way an index-keyed replacement can.
+
+    Returns
+    -------
+    list of tuple of (str, str)
+        (cell id, patch source filename) for each module cell.
+    """
+    return [(f"a-{Path(target).stem}", target)
+            for target in sorted(set(WRITE_MODULES.values()))]
 
 
 def main() -> int:
@@ -225,16 +267,19 @@ def main() -> int:
     nb = json.loads(NB_PATH.read_text(encoding="utf-8"))
     cells = nb["cells"]
 
-    # The REPLACE indices refer to the notebook as it stands *before* this patch. Once cells are
-    # inserted, those indices point at the wrong cells, so a second run would silently corrupt
-    # the file (it did: cell 130 received the wrong source). Refuse rather than guess.
-    if nb.get("metadata", {}).get("patched_by_addendum"):
-        print(f"NOTHING WRITTEN: {NB_PATH.name} is already patched by this script.\n"
-              "  Its cell indices have shifted, so re-running would replace the wrong cells.\n"
-              "  Restore the fix-brief version first:\n"
-              "      git checkout -- ipynb/model_training_measurement.ipynb\n"
-              "  or regenerate it with: python patch_notebook.py", file=sys.stderr)
-        return 3
+    # REPLACE indices refer to the notebook as it stands *before* this patch. Once cells are
+    # inserted those indices point at the wrong cells, so re-running the replacements would
+    # silently corrupt the file (it did: cell 130 received the wrong source). Insertions are
+    # keyed by cell id and so remain safe to repeat, which is what makes an already-patched
+    # notebook repairable rather than a dead end.
+    already = bool(nb.get("metadata", {}).get("patched_by_addendum"))
+    if already:
+        print(f"NOTE: {NB_PATH.name} is already patched. Index-keyed REPLACE is skipped, because "
+              "the\n      insertions have shifted those indices. Cells addressed *by id* are still "
+              "refreshed,\n      which is how an already-patched notebook is repaired.")
+        do_replace = False
+    else:
+        do_replace = True
 
     print(f"notebook: {NB_PATH.name} ({len(cells)} cells)")
 
@@ -247,7 +292,7 @@ def main() -> int:
         print("\n(dry run: nothing written)")
         return 0
 
-    for idx in sorted(REPLACE):
+    for idx in (sorted(REPLACE) if do_replace else ()):
         name = REPLACE[idx]
         if idx >= len(cells):
             print(f"  SKIP cell {idx}: does not exist", file=sys.stderr)
@@ -255,14 +300,31 @@ def main() -> int:
         cell = cells[idx]
         want = "markdown" if name.endswith(".md") else "code"
         if cell["cell_type"] != want:
-            print(f"  SKIP cell {idx}: is {cell['cell_type']}, source is {want}", file=sys.stderr)
+            print(f"  SKIP cell {idx}: is {cell['cell_type']}, source is {want}",
+                  file=sys.stderr)
             continue
         before = len("".join(cell["source"]))
-        text = (build_writefile_cell() if name in WRITE_MODULES.values()
-                else read_source(name))
+        mod = module_for(name)
+        text = build_writefile_cell(mod) if mod else read_source(name)
         cell["source"] = to_lines(text)
         cell["id"] = f"a-{Path(name).stem}"
-        print(f"  replace {idx:>4}  {want:8s} {name}  ({before} -> {len(text)} chars)")
+        print(f"  replace {idx:>4}  {want:8s} {name}  "
+              f"({before} -> {len(text)} chars)")
+
+    # Id-keyed repair: the %%writefile cells are rewritten wherever they now sit. Skipped when
+    # the target is already byte-identical, so this is a no-op on a correctly patched notebook.
+    if not do_replace:
+        for cid, name in _by_id_repairs():
+            for cell in cells:
+                if cell.get("id") != cid:
+                    continue
+                mod = module_for(name)
+                text = build_writefile_cell(mod) if mod else read_source(name)
+                if "".join(cell["source"]) != text:
+                    before = len("".join(cell["source"]))
+                    cell["source"] = to_lines(text)
+                    print(f"  REPAIRED by id  {cid}  ({before} -> {len(text)} chars)")
+                break
 
     # Insertions are keyed by cell id so the patch is idempotent: running it twice must not
     # duplicate the inserted cells. Already-present ids are reported and skipped.
@@ -276,7 +338,9 @@ def main() -> int:
         pending.append((anchor, name))
 
     by_anchor: Dict[int, List[dict]] = {}
-    for anchor, name in pending:
+    # On an already-patched notebook the numeric anchors are stale, so insertions are placed by
+    # the re-anchor path below instead of by index. Doing both would insert each cell twice.
+    for anchor, name in ([] if already else pending):
         by_anchor.setdefault(anchor, []).append(make_cell(name))
 
     new_cells: List[dict] = []
@@ -286,6 +350,36 @@ def main() -> int:
             new_cells.append(extra)
     for anchor in sorted(a for a in by_anchor if a >= len(cells)):
         new_cells.extend(by_anchor[anchor])
+
+    # A duplicate cell id means two cells would write the same file, and `%%writefile` would
+    # silently write it twice. Keep the last occurrence - on a repaired notebook that is the one
+    # the current sources produced - and drop earlier ones.
+    last_at: Dict[str, int] = {}
+    for k, cell in enumerate(new_cells):
+        last_at[cell.get("id")] = k
+    deduped: List[dict] = []
+    for k, cell in enumerate(new_cells):
+        cid = cell.get("id")
+        if last_at[cid] != k:
+            print(f"  REMOVED duplicate cell id {cid} (kept the later copy)")
+            continue
+        deduped.append(cell)
+    new_cells = deduped
+
+    # On an already-patched notebook the numeric anchors point at shifted cells, so a pending
+    # insertion is re-anchored to sit immediately after the last *already-present* cell from the
+    # same anchor group. That keeps ordering correct without trusting a stale index.
+    if already and pending:
+        for anchor, name in list(pending):
+            siblings = [f"a-{Path(n).stem}" for a, n in INSERT_AFTER
+                        if a == anchor and (a, n) not in pending]
+            positions = [k for k, c in enumerate(new_cells) if c.get("id") in siblings]
+            if not positions:
+                continue
+            at = max(positions) + 1
+            new_cells.insert(at, make_cell(name))
+            pending.remove((anchor, name))
+            print(f"  RE-ANCHORED after {siblings[-1]} (was after index {anchor})  {name}")
 
     # The original notebook predates nbformat 4.5's mandatory, pattern-constrained cell ids, so
     # both cases are handled here: a missing id is filled in, and an id containing a dot (a patch
