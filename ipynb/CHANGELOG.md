@@ -113,6 +113,59 @@ The patch was checked without BodyM, using synthetic silhouettes:
 Not executed here (no BodyM, no GPU): the data-integrity suite, the EDA figures, B0/B1 fitting on
 real masks, CNN training, the sweeps, ONNX export and the subprocess tests. Those run on Kaggle.
 
+## Addendum A - execution, persistence and resume
+
+Second patch, applied by `patch_addendum.py` after the fix-brief patch. 142 -> 150 cells
+(8 inserted: 3 markdown, 5 code).
+
+| ID | Requirement | Implementation |
+|----|-------------|----------------|
+| A0 | Phases 0-3 run on CPU | `phase_wrap.guard()` wraps CPU-only phases in `run_state.cpu_guard()`, which raises on any `Tensor.to('cuda')` / `.cuda()`. Trips are asserted in smoke mode, so the claim is executable rather than printed. |
+| A1 | Working-directory file/GB budget | `run/ckpt/{variant}/` holds exactly `last.pt` and `best.pt`; nothing is written per epoch. `check_working_budget()` asserts `max_files_working` (200) and `max_gb_working` (15.0) against Kaggle's ~500 files / 20 GB, with the ten largest files named. Regenerable caches go to `/kaggle/temp`. |
+| A2 | `config_hash` gating | 16-hex sha256 over the sorted YAML config, excluding only `hash_exclude`. `smoke_test` and `run_final_eval` are **included** - both change what is computed. A phase is reusable only when status is `done` **and** the hash matches **and** every listed artefact exists; all three are checked independently and each is proven to fail on its own in smoke mode. |
+| A3 | Resume across sessions | `adopt_resume_source()` looks for `<working>/run/manifest.json` first, then `/kaggle/input/*/run/manifest.json`, prefers the working directory, and prints which source it used. A corrupt manifest degrades to a fresh one rather than aborting. |
+| A4 | Resume must be deterministic | Three properties, each exercised: step-based cosine LR over the full `total_steps` budget (stored in `last.pt` and reused on resume); per-epoch `(seed, epoch)` shuffle generator; Python/NumPy/torch/CUDA RNG restored from `last.pt`. `best.pt` loads only on a fresh start. Early stopping (patience 3, min_delta 1 mm) with the counter persisted. Session-time guard saves, marks `partial`, and calls back instead of raising. |
+| A5 | Single-use test sets | `evaluate_test_lock()` compares the SHA-256 of each `best.pt` against the previous `final_eval.json`: `run` / `reuse` (same weights - test sets not re-read) / `blocked` (changed weights). On `blocked` the phase is marked `blocked`, the reason printed, **and the export still runs** with the absence recorded on the model card. |
+| A6 | Atomic writes | `atomic_save()` / `atomic_write_bytes()` write to a `.tmp<pid>` sibling then `os.replace`. Verified: no `.tmp` residue, and no orphan `.npz` (numpy appends the suffix to a path that lacks it - the writer hands it a file object instead). |
+| A7 | Machine-checkable gates | `RunState.validate()` schema-checks the manifest at startup; `check_working_budget()`; `cpu_guard()`; the determinism/early-stopping/time-guard cell. |
+
+### Verification performed here
+
+- `patch_addendum.py --dry-run` then apply; a second run refuses with exit 3 rather than corrupting
+  the file (indices shift once cells are inserted - this was found and fixed after it happened once)
+- `nbformat.validate` passes on all 150 cells
+- every code cell parses with `ast.parse`
+- `_test_rs.py` - 33 checks on `run_state`: hash stability and `hash_exclude`; all three reuse
+  conditions failing independently; payload round-trip (DataFrame/ndarray/JSON/meta); manifest schema
+  validation; corrupt-manifest recovery; `maybe_skip` / `BLOCKED` / `partial` blocking; the
+  test-set lock's four branches; the CUDA tripwire; the budget cap; atomic writes with no residue.
+  **All passed.**
+- `_test_train.py` - resume determinism, early stopping, the time guard, checkpoint contents.
+  **All passed.** Headline: `|straight - resumed| = 0.000e+00 mm` against the addendum's 1e-3
+  tolerance, with identical per-epoch validation history and identical per-epoch learning rates.
+
+### Two design points worth flagging
+
+**The determinism test interrupts with `max_epochs_this_call`, not with a smaller `epochs`.**
+Passing `epochs=1` for the first session changes `total_steps` from 24 to 12, so the cosine schedule
+differs from step 0 and the two runs diverge for a reason unrelated to resume. That was the first
+version of the test and it failed - the failure was in the test, not the code. A real session ends
+via the time guard, which leaves the configured budget untouched. The cell now asserts the
+per-epoch learning rates match, so this cannot regress unnoticed.
+
+**Early stopping makes `TRAIN_STEPS` a result, not an input.** With `epochs_prod: 8` and
+`patience: 3`, variants will often stop around epoch 4-5. Every step-count comparison against a
+published budget must therefore quote the printed `epochs_completed` / `total_steps_run` for that
+variant. Stated in the markdown at the training cell rather than buried here.
+
+### Deliberately not applied
+
+- Early stopping to B0's `HistGradientBoosting`. sklearn's internal validation split would make the
+  non-visual bar stochastic, so every "B0 beats vision" comparison would hinge on a coin flip. B1's
+  ridge is closed-form and needs no such treatment. Both stay deterministic.
+- A hard raise on A5 `blocked`. Sections 9-11 still produce a bundle whose model card records the
+  absence and the reason.
+
 ## Not implemented
 
 | Item | Reason |

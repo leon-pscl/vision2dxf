@@ -1,3 +1,5 @@
+require("p04_b0", "p05_b1", "p08_train_vhw", "p09_train_vh")
+
 # --- the one comparison table brief section 10 asks for ------------------------------------
 if not RUN_FINAL_EVAL:
     print("=== MAE (mm) — all models, both test splits ===")
