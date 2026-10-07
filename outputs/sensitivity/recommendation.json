@@ -1,0 +1,15 @@
+{
+  "recommended_design": "design_c_template",
+  "outright_wins": 120,
+  "win_pct": 100.0,
+  "mean_score": 7.75,
+  "mean_rank": 1.0,
+  "note": "Results depend on criterion priorities if margins are close.",
+  "missing_criteria": [
+    "economic",
+    "usability",
+    "performance",
+    "reliability",
+    "maintainability"
+  ]
+}

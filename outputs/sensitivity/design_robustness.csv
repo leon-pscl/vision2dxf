@@ -1,0 +1,4 @@
+design_id,outright_wins,tied_wins,win_pct,mean_score,score_std,mean_rank,worst_rank,mean_margin
+design_a_formula,0,0,0.0,5.5,0.0,3.0,3,2.25
+design_b_parametric,0,0,0.0,5.9381,0.0,2.0,2,2.25
+design_c_template,120,0,100.0,7.75,0.0,1.0,1,2.25

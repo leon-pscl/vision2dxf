@@ -1,0 +1,4 @@
+design_id,halstead_program_volume,median_generation_time_ms,failure_rate_percent,maintainability_index,mean_sus_score
+design_a_formula,317.7968,0.00577175,0.0,84.3091,
+design_b_parametric,361.0387,0.15091125,0.0,74.8312,
+design_c_template,658.5527,0.26277649999999997,0.0,65.2355,

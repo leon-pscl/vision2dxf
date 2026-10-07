@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: vision2dxf
+Version: 0.1.0
+Summary: Skeletal design-comparison prototype for garment pattern generation
+Requires-Python: >=3.10
+Requires-Dist: streamlit>=1.28.0
+Requires-Dist: pandas>=2.0.0
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: radon>=6.0.0
+Requires-Dist: plotly>=5.18.0
+Requires-Dist: ezdxf>=0.18.0
+Requires-Dist: PyYAML>=6.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4.0; extra == "dev"
