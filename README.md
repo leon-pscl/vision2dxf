@@ -174,7 +174,7 @@ backend drops every session.
 CORS is an allow-list from config, not `*`, so a random website cannot drive a
 locally running instance.
 
-## Licence
+## License
 
 This is an academic project. Ultralytics YOLO, which phase 2 will use for
 detection and segmentation, is licensed **AGPL-3.0**.
