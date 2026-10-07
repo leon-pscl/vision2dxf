@@ -1,0 +1,5 @@
+Placeholder. Phase 2 adds:
+  download_weights.py      fetch and checksum phase 2 model weights
+  eval_segmentation.py     IoU, boundary error, runtime, per segmenter variant
+  compare_silhouettes.py   regressor-input compatibility check
+  export_template.py       notebook helper for model packages

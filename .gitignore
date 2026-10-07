@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+node_modules/
+dist/
+.vite/
+coverage/
+*.tsbuildinfo
+
+weights/*
+!weights/.gitkeep
+models/*
+!models/.gitkeep
+data/*
+!data/.gitkeep
+
+# never allow captured photos or masks to be committed
+*.jpg
+*.jpeg
+*.png
+!frontend/public/**
+.env

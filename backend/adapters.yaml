@@ -1,0 +1,25 @@
+# Maps each step to a dotted class path.
+#
+# Swapping a model is exactly one edit here. No other file changes.
+# Paths are relative to the backend/ directory.
+
+garment_spec: adapters.mock.garment_spec.MockGarmentSpec
+
+capture: adapters.mock.capture.MockCapture
+
+segmentation: adapters.mock.segmentation.MockSegmentation
+
+calibration: adapters.mock.calibration.MockCalibration
+
+landmarks: adapters.mock.landmarks.MockLandmarks
+
+# step 6 has two backends, the user picks one in the UI
+measurement_regression: adapters.mock.measure_regression.MockRegression
+measurement_body_model: adapters.mock.measure_body_model.MockBodyModel
+
+validation: adapters.mock.validation.MockValidation
+
+drafting: adapters.mock.drafting.MockDrafting
+production: adapters.mock.production.MockProduction
+
+drape: adapters.mock.drape.MockDrape

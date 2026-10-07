@@ -1,0 +1,62 @@
+# Thresholds and settings. Nothing numeric lives in .py files.
+# This file is code: changing it changes behaviour, so it is not a secret.
+
+# cpu | cuda
+device: cpu
+
+server:
+  # CORS allow-list. Any origin listed here may call the API from a browser.
+  # Keep it to the dev servers; "*" would let any website the user visits call a
+  # locally running instance, and there is no auth on any endpoint.
+  cors_origins:
+    - http://localhost:5173
+    - http://127.0.0.1:5173
+  # sessions and their images live in memory forever unless this caps it.
+  # Evict the oldest when the cap is hit.
+  max_sessions: 50
+
+capture:
+  # pose band, filled in by the step-2 pose adapter
+  shoulder_elbow_wrist_deg: [150, 190]   # A-pose arm straightness
+  min_keypoint_confidence: 0.5
+  # person bbox height as a fraction of image height
+  bbox_height_fraction: [0.55, 0.95]
+  # clothing hint: skin-tone fraction must stay under this
+  max_skin_fraction: 0.35
+
+calibration:
+  # method: height | reference_object
+  method: height
+  # assumed error in the top/bottom mask row, in px. Drives relative_uncertainty.
+  pixel_error_px: 3.0
+  # used only when method == reference_object
+  reference_object_cm: 30.0
+
+measurement:
+  # half-width of the reported interval when the backend has no conformal
+  # calibration, as a fraction of the value
+  default_interval_fraction: 0.03
+  # hard floor so tiny measurements still get a usable interval
+  min_interval_cm: 0.8
+
+validation:
+  # ease limits, in cm, per measurement
+  max_ease_cm: 12.0
+  min_ease_cm: -4.0
+  # tolerance between garment ease and what the body actually allows
+  ease_tolerance_cm: 2.0
+
+drafting:
+  seam_allowance_cm: 1.0
+  notch_depth_cm: 0.4
+
+drape:
+  toile_checklist:
+    - Collar sits flat against the neckline, no standing or gaping.
+    - Placket is centred and runs parallel to the centre front.
+    - Armhole seam meets the sleeve head without puckering.
+    - Side seams hang vertical, no front or back dragging.
+    - Hem sits level all the way around.
+    - Sleeve opens without pulling at the elbow.
+    - Zipper or buttons close without strain.
+    - Fit is checked standing, sitting and with arms raised.
