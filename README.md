@@ -21,8 +21,10 @@ Requires Python 3.10+ (tested on 3.14).
 python3 -m venv .venv
 
 # 2. Activate it
-# Linux / macOS
+# Linux / macOS (bash / zsh)
 source .venv/bin/activate
+# Linux / macOS (fish)
+source .venv/bin/activate.fish
 # Windows (PowerShell)
 .venv\Scripts\Activate.ps1
 # Windows (cmd)
