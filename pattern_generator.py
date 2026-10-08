@@ -1,11 +1,12 @@
-"""Convert a GarmageSet (Style3D) pattern JSON into a sewing-pattern PDF.
+"""Convert every GarmageSet (Style3D) pattern JSON under sample_patterns/ into a
+sewing-pattern PDF in output/.
 
 Usage: python3 pattern_generator.py
-       (interactive file picker lists sample_patterns/*.json)
 """
 
 from __future__ import annotations
 
+import gc
 import json
 import math
 import sys
@@ -92,10 +93,11 @@ class Panel:
     id: str
     label: str
     center: np.ndarray
-    edges: list[Edge] = field(default_factory=list)
+    edges: list[Edge] = field(default_factory=list)  # every loop, in order
+    outer: int = 0  # how many leading edges form the visible contour
 
     def contour(self, interp: str) -> np.ndarray:
-        parts = [e.curve(interp)[:-1] for e in self.edges]
+        parts = [e.curve(interp)[:-1] for e in self.edges[: self.outer]]
         return np.vstack(parts + [parts[0][:1]])
 
 
@@ -107,11 +109,14 @@ def load(path: Path) -> tuple[dict[str, Panel], list]:
         if len(loops) != 1:
             name = LABELS_EN.get(p["label"], p["label"])
             print(f"warning: panel {name} has {len(loops)} loops (holes?)")
+        # all loops are loaded so stitches referencing a hole edge resolve
         edges = [
             Edge(e["id"], e["label"], np.array(e["controlPoints"], dtype=float)[:, :2])
-            for e in loops[0]["edges"]
+            for loop in loops
+            for e in loop["edges"]
         ]
-        panels[p["id"]] = Panel(p["id"], p["label"], np.array(p["center"][:2]), edges)
+        outer = len(loops[0]["edges"])
+        panels[p["id"]] = Panel(p["id"], p["label"], np.array(p["center"][:2]), edges, outer)
     return panels, data["stitches"]
 
 
@@ -210,24 +215,6 @@ def render_pdf(path: Path, panels: dict[str, Panel], interp: str) -> None:
 
 
 # ----------------------------------------------------------------- CLI --
-def pick_file() -> Path:
-    folder = Path(__file__).resolve().parent / "sample_patterns"
-    files = sorted(folder.glob("*.json"))
-    if not files:
-        sys.exit("No JSON files found in sample_patterns/")
-    print("Available pattern files:\n")
-    for i, f in enumerate(files, 1):
-        print(f"  [{i}] {f.name}")
-    choice = input("\nPick a file number: ")
-    try:
-        idx = int(choice) - 1
-        if idx < 0:
-            raise IndexError
-        return files[idx]
-    except (ValueError, IndexError):
-        sys.exit("Invalid choice.")
-
-
 def best_interp(panels: dict[str, Panel], stitches: list) -> str:
     if not stitches:
         return "B_through_points"
@@ -240,15 +227,32 @@ def best_interp(panels: dict[str, Panel], stitches: list) -> str:
     return best_key
 
 
-def main() -> None:
-    src = pick_file()
-    print(f"\nLoading {src.name}...")
+def convert(src: Path, out_dir: Path) -> None:
+    out_path = out_dir / (src.stem + "_pattern.pdf")
+    if out_path.exists():
+        return
     panels, stitches = load(src)
     interp = best_interp(panels, stitches)
-    print(f"{len(panels)} panels, curve method: {interp}")
-    out_path = Path(src.stem + "_pattern.pdf")
     render_pdf(out_path, panels, interp)
-    print(f"Wrote {out_path.resolve()}")
+    gc.collect()
+    print(f"{src.name}: {len(panels)} panels, {interp} -> {out_path.name}")
+
+
+def main() -> None:
+    sys.stdout.reconfigure(errors="replace")  # Windows consoles reject CJK labels
+    root = Path(__file__).resolve().parent
+    out_dir = root / "pattern_template_output"
+    out_dir.mkdir(exist_ok=True)
+    files = sorted((root / "pattern_templates").rglob("*.json"))
+    if not files:
+        sys.exit("No JSON files found in pattern_templates/")
+    print(f"Converting {len(files)} pattern file(s)...\n")
+    for src in files:
+        try:
+            convert(src, out_dir)
+        except Exception as e:  # one bad file must not stop the batch
+            print(f"{src.name}: FAILED ({type(e).__name__}: {e})")
+    print(f"\nDone: {len(files)} file(s) processed.")
 
 
 if __name__ == "__main__":
