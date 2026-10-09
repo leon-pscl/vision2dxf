@@ -1,11 +1,13 @@
-"""Convert every GarmageSet (Style3D) pattern JSON under sample_patterns/ into a
-sewing-pattern PDF in output/.
+"""Convert every GarmageSet (Style3D) pattern JSON under pattern_templates/ into
+sewing-pattern images (PDF or JPG) in pattern_template_output/<format>/.
 
-Usage: python3 pattern_generator.py
+Usage: python pattern_generator.py --format pdf
+       python pattern_generator.py --format jpg
 """
 
 from __future__ import annotations
 
+import argparse
 import gc
 import json
 import math
@@ -196,7 +198,7 @@ def write_dxf_r12(path: Path, panels: dict[str, Panel], interp: str) -> None:
 
 
 # --------------------------------------------------------------- render --
-def render_pdf(path: Path, panels: dict[str, Panel], interp: str) -> None:
+def _render(path: Path, panels: dict[str, Panel], interp: str, fmt: str) -> None:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -210,7 +212,10 @@ def render_pdf(path: Path, panels: dict[str, Panel], interp: str) -> None:
     ax.set_aspect("equal")
     ax.axis("off")
     fig.tight_layout(pad=0.5)
-    fig.savefig(path, format="pdf")
+    save_kw = {"format": fmt}
+    if fmt == "jpg":
+        save_kw.update(format="jpeg", dpi=200, facecolor="white")
+    fig.savefig(path, **save_kw)
     plt.close(fig)
 
 
@@ -227,32 +232,39 @@ def best_interp(panels: dict[str, Panel], stitches: list) -> str:
     return best_key
 
 
-def convert(src: Path, out_dir: Path) -> None:
-    out_path = out_dir / (src.stem + "_pattern.pdf")
+def convert(src: Path, out_dir: Path, fmt: str) -> None:
+    out_path = out_dir / (src.stem + f"_pattern.{fmt}")
     if out_path.exists():
         return
     panels, stitches = load(src)
     interp = best_interp(panels, stitches)
-    render_pdf(out_path, panels, interp)
+    _render(out_path, panels, interp, fmt)
     gc.collect()
     print(f"{src.name}: {len(panels)} panels, {interp} -> {out_path.name}")
 
 
 def main() -> None:
     sys.stdout.reconfigure(errors="replace")  # Windows consoles reject CJK labels
+
+    parser = argparse.ArgumentParser(description="Convert pattern JSON to PDF or JPG.")
+    parser.add_argument("--format", choices=["pdf", "jpg"], default="pdf",
+                        help="Output format: pdf (default) or jpg")
+    args = parser.parse_args()
+    fmt = args.format
+
     root = Path(__file__).resolve().parent
-    out_dir = root / "pattern_template_output"
-    out_dir.mkdir(exist_ok=True)
+    out_dir = root / "pattern_template_output" / fmt
+    out_dir.mkdir(parents=True, exist_ok=True)
     files = sorted((root / "pattern_templates").rglob("*.json"))
     if not files:
         sys.exit("No JSON files found in pattern_templates/")
-    print(f"Converting {len(files)} pattern file(s)...\n")
+    print(f"Converting {len(files)} pattern file(s) to {fmt.upper()}...\n")
     for src in files:
         try:
-            convert(src, out_dir)
+            convert(src, out_dir, fmt)
         except Exception as e:  # one bad file must not stop the batch
             print(f"{src.name}: FAILED ({type(e).__name__}: {e})")
-    print(f"\nDone: {len(files)} file(s) processed.")
+    print(f"\nDone: {len(files)} file(s) processed -> {out_dir}")
 
 
 if __name__ == "__main__":
