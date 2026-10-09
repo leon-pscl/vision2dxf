@@ -1,13 +1,11 @@
 """Convert every GarmageSet (Style3D) pattern JSON under pattern_templates/ into
 sewing-pattern images (PDF or JPG) in pattern_template_output/<format>/.
 
-Usage: python pattern_generator.py --format pdf
-       python pattern_generator.py --format jpg
+Usage: python pattern_generator.py
 """
 
 from __future__ import annotations
 
-import argparse
 import gc
 import json
 import math
@@ -246,11 +244,8 @@ def convert(src: Path, out_dir: Path, fmt: str) -> None:
 def main() -> None:
     sys.stdout.reconfigure(errors="replace")  # Windows consoles reject CJK labels
 
-    parser = argparse.ArgumentParser(description="Convert pattern JSON to PDF or JPG.")
-    parser.add_argument("--format", choices=["pdf", "jpg"], default="pdf",
-                        help="Output format: pdf (default) or jpg")
-    args = parser.parse_args()
-    fmt = args.format
+    choice = input("Export format — [1] PDF  [2] JPG: ").strip()
+    fmt = "jpg" if choice == "2" else "pdf"
 
     root = Path(__file__).resolve().parent
     out_dir = root / "pattern_template_output" / fmt
