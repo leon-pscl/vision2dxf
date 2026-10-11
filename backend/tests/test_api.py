@@ -294,6 +294,16 @@ def test_browser_sequence_from_upload_to_generation(yaml_ok, confirmations):
                        json={"yamlText": yaml_ok, "confirmations": confirmations}).status_code == 200
 
 
+def test_invalid_yaml_is_a_structured_error_for_semantics_endpoints():
+    payload = {"yamlText": "body: [invalid"}
+    for path in ("/api/measurements/semantics", "/api/measurements/report",
+                 "/api/patterns/generate"):
+        response = client.post(path, json=payload)
+        assert response.status_code == 422, path
+        assert response.json()["error"]["code"] == "invalid_yaml"
+        assert "Traceback" not in response.text
+
+
 def test_no_endpoint_returns_a_raw_traceback(yaml_ok, confirmations):
     """Broken payloads come back as structured errors, never a 500 stack trace."""
     # an unknown candidate is reported on /semantics so the screen can render it, and

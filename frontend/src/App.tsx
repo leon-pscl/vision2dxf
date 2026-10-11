@@ -126,8 +126,8 @@ export default function App() {
           <UploadStep
             yaml={input.yamlText}
             filename={input.filename}
-            setYaml={(yamlText) => setInput({ ...EMPTY_PAYLOAD, yamlText, filename: input.filename })}
-            setFilename={(filename) => setInput({ ...EMPTY_PAYLOAD, filename, yamlText: input.yamlText })}
+            setYaml={(yamlText) => setInput((prev) => ({ ...EMPTY_PAYLOAD, yamlText, filename: prev.filename }))}
+            setFilename={(filename) => setInput((prev) => ({ ...EMPTY_PAYLOAD, filename, yamlText: prev.yamlText }))}
             onUploaded={(r) => {
               setReview(r)
               setSemanticsReady(false)

@@ -44,7 +44,7 @@ def _semantics(req) -> tuple[tuple, JSONResponse | None]:
     try:
         return resolve_semantics(req.yamlText, req.filename, req.confirmations, req.corrections), None
     except MeasurementError as exc:
-        return None, JSONResponse(
+        return (None, None), JSONResponse(
             status_code=422,
             content={"error": {"code": "invalid_yaml", "message": "Measurement import failed.",
                                "details": exc.errors}},
