@@ -1,0 +1,11 @@
+# Host development environment: conda env create -f environment.yml
+# Python version and the pip dependencies stay in one place (requirements.txt),
+# which is also what the container's /opt/venv installs.
+name: bodymeasure
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - -r requirements.txt

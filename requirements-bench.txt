@@ -1,0 +1,18 @@
+# M4b only (the GarmentCode bench). Kept out of the image and out of
+# environment.yml: trimesh is all the bench needs.
+#
+# pygarment is NOT listed. The PyPI wheel installs its modules under different
+# top-level names and does not ship the BodyParameters subclass, and installing
+# it downgrades numpy below what opencv-python 5 needs. The bench imports
+# pygarment from the cloned repository instead:
+#
+#   git clone https://github.com/maria-korosteleva/GarmentCode vendor/GarmentCode
+-r requirements.txt
+trimesh>=4.5
+
+# What the cloned pygarment imports. These do not disturb the pinned versions;
+# the PyPI pygarment package does.
+cairosvg
+svgwrite
+svgpathtools
+scipy

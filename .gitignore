@@ -1,26 +1,30 @@
+# Python
 __pycache__/
 *.py[cod]
 .venv/
 venv/
+*.egg-info/
 .pytest_cache/
-.mypy_cache/
+.ruff_cache/
 
-node_modules/
-dist/
-.vite/
-coverage/
-*.tsbuildinfo
+# Captured subject data and calibration output (privacy: never commit)
+data/
+config/calibration.yaml
 
-weights/*
-!weights/.gitkeep
-models/*
-!models/.gitkeep
-data/*
-!data/.gitkeep
+# Model weights
+models/
+*.pt
 
-# never allow captured photos or masks to be committed
-*.jpg
-*.jpeg
-*.png
-!frontend/public/**
-.env
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Cloned third-party sources (GarmentCode assets for the M4b bench)
+vendor/
+bench/out/
+
+# TLS material, if you generate a certificate for LAN capture
+certs/
+*.pem

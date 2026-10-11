@@ -1,184 +1,187 @@
-# vision2dxf
+# Body Measurement Demo (Objective 1.1)
 
-Made-to-measure garment pattern generation from body photos.
+Local web app that turns a front photo plus at least one side photo into
+GarmentCode body parameters, using silhouette geometry only — no machine-learned
+measurement model. Full specification: [docs/AGENT_BRIEF.md](docs/AGENT_BRIEF.md).
 
-The pipeline has ten steps:
+**Status: complete (M0-M6 and the M4b bench).** Calibration, YOLO26 segmentation
+and pose, the pose gate, landmark search, the 26 GarmentCode keys, the capture
+and review pages, and the bench against the five GarmentCode reference bodies.
+Measured accuracy and its limits: [bench/README.md](bench/README.md).
 
-1. Garment type
-2. Capture
-3. Segmentation
-4. Calibration
-5. Landmarks
-6. Measurement (6a regression, 6b body model)
-7. Validation and YAML
-8. Drafting
-9. Production details
-10. Validation (draping and toile)
-
-**Phase 1 is a clickable UI with mock adapters.** Steps 2 to 5 get real
-pretrained models in phase 2; everything else stays mocked for now. Every
-result carries `is_mock`, and the UI shows a yellow **MOCK DATA – not real
-measurements** banner whenever any result in the session is a mock.
-
-## Run it
-
-Two terminals, no containers:
+## Run it (Docker — nothing else to install)
 
 ```bash
-# backend
-cd backend
-python -m venv .venv && .venv/Scripts/pip install -r requirements.txt   # Windows
-# .venv/bin/pip install -r requirements.txt                            # macOS/Linux
-.venv/bin/python -m uvicorn main:app --port 8000
-
-# frontend
-cd frontend
-npm install
-npm run dev            # http://localhost:5173, proxies /api to :8000
+docker compose up --build        # http://localhost:8000
+docker compose down
 ```
 
-Or with containers, which is the easiest way to get a matching environment on
-an unfamiliar machine:
+Rebuild with `--build` whenever `requirements.txt` or the Dockerfile changes:
+`docker compose up` on its own reuses the old image and will keep serving stale
+dependencies. The whole repository is bind-mounted and uvicorn runs with
+`--reload`, so every edit applies live.
+
+Dependencies live in a venv at `/opt/venv` inside the image, already on `PATH`.
+Shell in with `docker compose exec app bash` — not `bash -l`, because a login
+shell resets `PATH` and you would get the system python instead.
+
+## Lint and tests
 
 ```bash
-docker compose up --build
+docker compose run --rm app bash scripts/check.sh    # ruff check + pytest
 ```
 
-Then open http://localhost:5173. The backend is published on :8000 and the
-frontend proxies `/api` to it, so both are reachable from the host.
-
-`frontend/Dockerfile` sets `VITE_API_TARGET=http://backend:8000` so the proxy
-resolves the service name inside the compose network; on the host, run
-`npm run dev` as above and it defaults back to `localhost:8000`.
-
-## Using it
-
-Step 1, pick a garment (Polo shirt / Long sleeve polo / Short sleeve polo /
-Slacks). Step 2, either hit **Use sample photos** for a drawn stand-in figure,
-or upload your own front and side photos, plus your height. The capture check
-then gives you distance, pose, framing and clothing verdicts.
-
-Steps 3 to 5 run off that photo. **Step 5 is where you spend time**: drag the
-landmark points onto the right places, then hit Confirm landmarks.
-
-Steps 6 to 10 stay locked until step 5 is confirmed, because everything
-downstream reads those landmarks. Steps 7 to 10 additionally wait for step 6 to
-have run. After that it is all tables and pattern output.
-
-## Tests
+The image carries the bench dependencies too, so the M4b bench runs in the
+container as well once the GarmentCode clone is in `vendor/` (it is bind-mounted
+from the host):
 
 ```bash
-cd backend  && .venv/bin/python -m pytest -q      # 47 tests, no network, no weights
-cd frontend && npm test                           # 12 tests, needs both servers up
-npm run build                                     # typecheck plus production build
+docker compose run --rm app python bench/run_bench.py vendor/GarmentCode/assets/bodies
 ```
 
-The frontend suite is real coverage, not smoke:
+## Local setup without Docker (conda)
 
-- `api.test.ts` walks all ten steps over HTTP and checks the contracts from the
-  client side. Skips if the backend is not on `:8000`.
-- `ui.clickthrough.test.ts` drives the actual UI in headless Chromium: it
-  uploads both views, reads the capture checklist, drags a landmark and checks
-  the point turns `user`, confirms the gate on step 6, runs both backends,
-  downloads the YAML, toggles the draft route, and ticks a toile box. Skips if
-  either server is down.
-- `svg.test.ts` covers the SVG sanitiser.
+Base miniconda is 3.13; this project pins **3.11**, because that is what the
+ultralytics/torch wheels target at M3. So it gets its own env:
 
-First run needs the browser: `npx playwright install chromium`.
-
-## Repository layout
-
-```
-backend/
-  main.py           FastAPI app, in-memory sessions
-  contracts.py      frozen Pydantic v2 models, one per step
-  registry.py       loads adapters.yaml, instantiates adapters
-  adapters.yaml     step -> dotted class path
-  config.yaml       every threshold and setting
-  adapters/base.py  one Protocol per step
-  adapters/mock/    deterministic phase-1 adapters
-  adapters/real/    phase 2 lands here
-  tests/
-frontend/           Vite + React + TypeScript, plain CSS
-scripts/            phase 2: weight download and evaluation harness
-weights/            git-ignored, populated by scripts/download_weights.py
-models/             git-ignored, model packages from the owner's notebook
+```bash
+conda env create -f environment.yml    # python 3.11 + requirements.txt
+conda activate bodymeasure
+./scripts/check.sh                     # ruff check + pytest
+uvicorn bodymeasure.api:app --reload   # http://localhost:8000
 ```
 
-## The core rule
+After changing `requirements.txt`: `conda env update -f environment.yml`.
+`environment.yml` only names the python version and points pip at
+`requirements.txt`, so the host env and the container install the same pins.
 
-Every model sits behind an adapter that implements a fixed contract. **Swapping
-a model takes exactly one edit, to `backend/adapters.yaml`.**
+`src/` is put on the path by `pyproject.toml` (`pythonpath`), so nothing needs
+installing in editable mode.
 
-```yaml
-segmentation: adapters.mock.segmentation.MockSegmentation
+## Calibration procedure
+
+Open `/calibrate.html` and work top to bottom. Enter the board geometry first:
+the counts are **inner** corners, so a 10x7-square board is 9x6.
+
+1. **Intrinsics.** Start the camera, then hold the checkerboard at 15-20
+   different angles, distances and positions in the frame. Grab a frame at each.
+   Vary the distance - boards all held at one depth leave the distortion terms
+   badly conditioned. Press *Compute intrinsics* and check `rms_px`: below ~0.5
+   is good, above ~1.0 means reshoot.
+2. **Scale.** Stand the board upright on the floor mark, square to the camera.
+   Measure from the board's lowest inner corners down to its bottom edge and
+   enter that as the bottom margin. Press *Measure scale*, check `mm_per_px_x`
+   and `mm_per_px_y` agree within about 1%, then *Save calibration*.
+
+Step 1 parks its result in `data/calib/intrinsics.yaml`; step 2 combines the two
+into `config/calibration.yaml`. Nothing is written until you press save. Either
+step also accepts uploaded image files instead of the webcam.
+
+## Layout
+
+| Path | What it holds |
+|---|---|
+| `config/app.yaml` | model paths, thresholds, camera index and rotation |
+| `config/schema.yaml` | the 26 GarmentCode keys, their units, views and default confidence |
+| `config/calibration.yaml` | written by the calibration page (M2); git-ignored |
+| `src/bodymeasure/` | `config.py`, `api.py` today; vision, geometry and measurement modules per milestone |
+| `web/` | plain HTML/CSS/JS, no build step |
+| `tests/` | pytest; `synthetic/` holds generated silhouettes with known answers (M1) |
+| `data/` | sessions and calibration captures — git-ignored, never committed |
+
+## Capture procedure
+
+Open `/` and work down the page.
+
+1. **Subject.** Enter the id and sex, tick consent, press *Start session*. No
+   image is captured until consent is ticked; the server refuses otherwise.
+2. **Camera.** Press *Start camera*. The preview is rotated to match the
+   calibrated rotation, so what you see is what gets measured. The red line is
+   the floor mark and the green outline is where the body should sit.
+3. **Captures.** Tight clothing, A-pose with the arms 20-45 degrees from the
+   body, standing on the floor mark. Each *Capture* button counts down from
+   three. The server segments the frame and runs the pose gate: a tick means the
+   view is usable, otherwise the reasons appear and *Retake* clears it.
+4. **Measure.** Enabled once the front and at least one side view pass. It
+   writes both YAML files and offers them for download.
+
+Without a webcam, every step also accepts an uploaded image, so the demo runs
+away from the station.
+
+## Capturing from another machine
+
+The camera is opened by the browser, so the station PC browsing to
+`http://localhost:8000` needs nothing extra. Browsing to the station by IP from
+another machine does: browsers refuse `getUserMedia` on a plain-http origin that
+is not localhost, and the *Start camera* button will report the refusal. Three
+ways round it, cheapest first:
+
+1. **Upload instead.** Every capture button has an upload beside it, so photos
+   taken on a phone work without any of this.
+2. **A tunnel.** `ssh -L 8000:localhost:8000 user@station` makes the station
+   look like localhost to the other machine, and nothing changes in the app.
+3. **HTTPS.** Generate a certificate and pass it to uvicorn:
+
+   ```bash
+   openssl req -x509 -newkey rsa:2048 -nodes -days 365 \n     -keyout certs/key.pem -out certs/cert.pem -subj "/CN=station"
+   ```
+
+   then add `--ssl-keyfile certs/key.pem --ssl-certfile certs/cert.pem` to the
+   `command:` in `docker-compose.yml`. A self-signed certificate still makes the
+   browser warn once; accepting it is enough for the camera to work.
+
+## Review procedure
+
+After measuring, open `/review/<session id>`.
+
+- Each view shows the photo with the mask outline, the keypoints and every
+  landmark. Drag a point, or drag a slice line to change its height; releasing
+  it recomputes and the table updates. A moved landmark turns magenta and is
+  recorded with `auto: false`.
+- The table lists all 26 values. Rows marked `estimated` or `low` are
+  highlighted: `bust_points` and `bum_points` are not visible in a silhouette at
+  all and start from the GarmentCode ratios, so a tape measurement belongs
+  there. Typing a value marks it `edited` with `source: tailor`, and the note
+  goes into the report.
+- Typed values survive later landmark drags; a fresh capture of a view clears
+  the stored landmarks, because they no longer describe the photo.
+- *Delete session* removes the folder and every photo in it, after confirming.
+
+## Model weights
+
+The two YOLO26 files are git-ignored and not baked into the image. Fetch them
+once, into `models/`:
+
+```bash
+python -c "from ultralytics import YOLO; YOLO('yolo26s-seg.pt'); YOLO('yolo26s-pose.pt')"
+mkdir -p models && mv yolo26s-*.pt models/
 ```
 
-Change that one line to `adapters.real.seg_sam2.Sam2Segmenter` and the app
-picks it up. No other file changes. This is covered by a test, not just a
-convention: `backend/tests/test_registry_swap.py` rewrites the file, clears the
-registry cache, and asserts step 3's response changed shape from a different
-class while the contract stayed identical.
+`config/app.yaml` points at `models/`, so fine-tuned weights drop in by replacing
+the files. `GET /api/health` reports whether they were found, and the capture
+page shows it. Both models load once at startup, not per request.
 
-`contracts.py` is frozen. If a real model cannot satisfy a contract, stop and
-report the mismatch rather than widening the contract.
+## Privacy
 
-### How to plug in a real model
+Subject images stay in `data/sessions/<id>/` on the station. `data/` and
+`config/calibration.yaml` are git-ignored. Capture requires a ticked consent
+checkbox, and each session can be deleted from the review page (M5/M6).
 
-1. Write the class in `backend/adapters/real/`. It needs a `run` method matching
-   the Protocol in `adapters/base.py` and must return the contract model from
-   `contracts.py`. Subclass nothing, register nothing.
-2. Import it lazily, once per process. Load weights at first `run`, not at
-   import, so the app still starts when the weights are missing.
-3. Add the import to `backend/requirements.txt` and pin exact versions. A model
-   that breaks the whole app on import is worse than no model.
-4. Point the step's key in `backend/adapters.yaml` at the new dotted path.
-5. Add any thresholds to `backend/config.yaml`. Nothing numeric goes in `.py`.
-6. Log inference time on every call.
-7. Record the model's licence in `LICENSES_MODELS.md`.
-8. Leave the mock registered under a second key so both stay selectable. Do not
-   delete the mocks.
+## Known limitations
 
-`adapters/real/dummy_seg.py` is a worked example: a whole adapter in about 20
-lines, used by the swap test.
-
-## Guarantees
-
-**User images are never written to disk.** The browser sends base64, the session
-holds it in a dict, and the mask generator builds PNGs in memory. A test
-snapshots the repository tree, runs the full pipeline twice, and fails if any
-image file appeared. Under Docker the backend container is checked too: it has
-no mounts at all, and a full click-through leaves no image file inside it.
-
-**Mocks are deterministic.** Seeded from the input, so the same photo always
-gives the same output, which makes the UI testable and screenshots stable.
-
-**Thresholds live in config.** `backend/config.yaml` holds device, pose bands,
-pixel error, interval widths, ease limits, seam allowance and the toile
-checklist. Change them without touching code.
-
-## Not production-ready
-
-This is a local research prototype. Two things it does not have:
-
-**No authentication.** Anyone who knows a `session_id` can read that session,
-including the base64 photos in it. `session_id` is a `uuid4().hex`, so it is not
-guessable, but there is no isolation between users. Do not serve this beyond
-localhost without adding auth.
-
-**Bounded but still in-memory state.** Sessions live in a dict, capped at
-`server.max_sessions` (50) with oldest-first eviction, so a long run cannot
-accumulate photos without limit. There is no persistence: restarting the
-backend drops every session.
-
-CORS is an allow-list from config, not `*`, so a random website cannot drive a
-locally running instance.
-
-## License
-
-This is an academic project. Ultralytics YOLO, which phase 2 will use for
-detection and segmentation, is licensed **AGPL-3.0**.
-
-Consequence: if this app is served over a network, the full source of the
-application must be made available to its users under AGPL-compatible terms.
-Internal academic use and evaluation are unaffected.
+- **Accuracy.** Against the GarmentCode reference bodies, bust, underbust and
+  waist land within 3 cm and height within 4 mm, but `crotch_hip_diff`,
+  `waist_line`, `arm_length` and the shoulder measurements are well out. The
+  causes are written up in [bench/README.md](bench/README.md); the short version
+  is that the maximum-curvature landmark search is not selective on a smooth
+  body, and the crotch row a silhouette shows is not the anatomical one.
+- **No real capture has been measured.** Every test uses drawn or rendered
+  figures. The pose-gate thresholds have never met a real A-pose.
+- Webcam capture works through the container, because the *browser* opens the
+  camera, not the server: open `http://localhost:8000` on the machine with the
+  webcam. Reaching the station from another machine over the LAN does not work,
+  though - `getUserMedia` is refused on a plain-http origin that is not
+  localhost. See *Capturing from another machine* below.
+- Model weights are not baked into the image; `models/` is bind-mounted.
+- `bust_points` and `bum_points` are not visible in a silhouette at all. They
+  start from the GarmentCode ratios and should be entered by tape.

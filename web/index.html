@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Capture</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main id="capture">
+    <h1>Body measurement</h1>
+    <p class="row">
+      <a href="/calibrate.html">Calibrate the station</a>
+      <output id="station-status" class="hint">checking…</output>
+    </p>
+
+    <section>
+      <h2>1 &mdash; Subject</h2>
+      <p class="row">
+        <label>Subject ID <input id="subject-id" type="text" placeholder="S014" /></label>
+        <label>Sex
+          <select id="sex">
+            <option value="F">F</option>
+            <option value="M">M</option>
+            <option value="other">other</option>
+          </select>
+        </label>
+      </p>
+      <p class="row">
+        <label class="consent">
+          <input id="consent" type="checkbox" />
+          The subject has been told what is captured and consents to it.
+        </label>
+      </p>
+      <p class="row">
+        <button id="start-session" type="button">Start session</button>
+        <output id="session-out"></output>
+      </p>
+    </section>
+
+    <section>
+      <h2>2 &mdash; Camera</h2>
+      <p class="row">
+        <button id="start-camera" type="button">Start camera</button>
+        <span class="hint">
+          Stand on the floor mark, inside the guide, arms 20&ndash;45&deg; from the body.
+        </span>
+      </p>
+      <canvas id="preview"></canvas>
+      <video id="source" autoplay playsinline muted hidden></video>
+    </section>
+
+    <section>
+      <h2>3 &mdash; Captures</h2>
+      <p class="hint">Front is required. At least one side view is required.</p>
+      <ul id="views" class="captures">
+        <li data-view="front">
+          <span class="view-name">Front</span>
+          <button type="button" data-action="capture" disabled>Capture</button>
+          <label class="upload">or upload<input type="file" accept="image/*" /></label>
+          <button type="button" data-action="retake" hidden>Retake</button>
+          <output></output>
+        </li>
+        <li data-view="side_left">
+          <span class="view-name">Left side</span>
+          <button type="button" data-action="capture" disabled>Capture</button>
+          <label class="upload">or upload<input type="file" accept="image/*" /></label>
+          <button type="button" data-action="retake" hidden>Retake</button>
+          <output></output>
+        </li>
+        <li data-view="side_right">
+          <span class="view-name">Right side</span>
+          <button type="button" data-action="capture" disabled>Capture</button>
+          <label class="upload">or upload<input type="file" accept="image/*" /></label>
+          <button type="button" data-action="retake" hidden>Retake</button>
+          <output></output>
+        </li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>4 &mdash; Measure</h2>
+      <p class="row">
+        <button id="measure" type="button" disabled>Measure</button>
+        <output id="measure-out"></output>
+      </p>
+      <p class="row" id="downloads" hidden>
+        <a id="download-body" href="#" download>body_measurements.yaml</a>
+        <a id="download-report" href="#" download>measurement_report.yaml</a>
+      </p>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

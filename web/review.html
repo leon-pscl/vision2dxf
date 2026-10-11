@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Review</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main id="review" class="wide">
+    <h1>Review <output id="session-name"></output></h1>
+    <p class="row">
+      <a href="/">&larr; Capture</a>
+      <output id="review-status" class="hint">loading…</output>
+    </p>
+
+    <p id="warnings" class="warnings" hidden></p>
+
+    <section>
+      <h2>Landmarks</h2>
+      <p class="hint">
+        Drag a point to move it, or a line to change its height. Each drag
+        recomputes only the measurements that depend on it.
+      </p>
+      <div id="views" class="views"></div>
+    </section>
+
+    <section>
+      <h2>Measurements</h2>
+      <p class="hint">
+        Values marked <span class="chip estimated">estimated</span> or
+        <span class="chip low">low</span> deserve a second look. Type a value to
+        override it; the note is written to the report.
+      </p>
+      <table id="measurements">
+        <thead>
+          <tr>
+            <th>Measurement</th>
+            <th>Value</th>
+            <th>Unit</th>
+            <th>Confidence</th>
+            <th>Source</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Finish</h2>
+      <p class="row">
+        <a id="download-body" href="#" download>Export body_measurements.yaml</a>
+        <a id="download-report" href="#" download>Export measurement_report.yaml</a>
+        <button id="delete-session" type="button" class="danger">Delete session</button>
+      </p>
+      <p class="hint">
+        Deleting removes the folder with every photo of this subject. It cannot be undone.
+      </p>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

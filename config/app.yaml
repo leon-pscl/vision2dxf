@@ -1,0 +1,30 @@
+# Runtime configuration. Model paths live here so fine-tuned weights can be
+# swapped in without code changes.
+camera:
+  index: 0
+  rotation: 90          # degrees clockwise applied to raw frames
+
+models:
+  seg: models/yolo26s-seg.pt
+  pose: models/yolo26s-pose.pt
+  imgsz: 1280
+  retina_masks: true
+
+thresholds:
+  keypoint_conf: 0.5
+  mask_conf: 0.5
+  arm_angle_min_deg: 20       # A-pose: upper arm away from torso line
+  arm_angle_max_deg: 45
+  side_shoulder_ratio_max: 0.25   # side view is side-on when shoulder span < 25% of front
+  frame_margin_frac: 0.02         # mask must sit this far inside top and bottom
+  floor_row_tol_px: 15            # lowest mask row vs calibrated floor_row
+  morph_kernel_px: 5
+  hole_fill_max_area_px: 500
+
+defaults:
+  bust_points_ratio: 0.170        # GarmentCode mean_all.yaml: 16.95 / 99.84
+  bum_points_ratio: 0.176         # GarmentCode mean_all.yaml: 18.23 / 103.48
+
+paths:
+  sessions: data/sessions
+  calib: data/calib

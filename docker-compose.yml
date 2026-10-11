@@ -1,25 +1,11 @@
 services:
-  backend:
-    build: ./backend
+  app:
+    build: .
     ports:
       - "8000:8000"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/models')"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
-
-  frontend:
-    build: ./frontend
-    ports:
-      - "5173:5173"
-    depends_on:
-      backend:
-        condition: service_healthy
     volumes:
-      # source is mounted so edits hot-reload. This is code, not user images:
-      # captured photos are never written to disk, on either side.
-      - ./frontend:/app
-      - /app/node_modules
-    restart: unless-stopped
+      # The whole repo, so source, config, scripts, weights and captured data all
+      # come from the host. Dependencies live in /opt/venv, outside /app, so they
+      # survive the mount -- but changing them still needs `up --build`.
+      - .:/app
+    command: ["uvicorn", "bodymeasure.api:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

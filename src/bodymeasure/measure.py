@@ -1,0 +1,430 @@
+"""Turn landmarks plus silhouettes into the 26 GarmentCode body parameters (brief 5.7).
+
+The input is ``landmarks.json`` and the view masks, so the review UI can edit a
+landmark and call this again. Nothing here searches for landmarks: that is
+``landmarks.py``. Internal unit is millimetres; output is centimetres to one
+decimal, and degrees for the three angles.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+
+import numpy as np
+
+from bodymeasure.config import Calibration
+from bodymeasure.geometry import (
+    back_arc,
+    contour_length,
+    height_of_row,
+    hull_length,
+    run_containing,
+    runs_in_row,
+    two_semi_ellipse_girth,
+    width_at,
+)
+from bodymeasure.landmarks import THIGH_DEPTH_MM, Landmark, as_dict, balance_x_at
+from bodymeasure.posegate import L_ELBOW, L_SHOULDER, R_ELBOW, R_SHOULDER
+
+GIRTH_DISAGREEMENT_MM = 10.0  # two side views may differ by this much before a warning
+BUST_POINTS_RATIO = 0.170  # GarmentCode mean_all.yaml: 16.95 / 99.84
+BUM_POINTS_RATIO = 0.176  # GarmentCode mean_all.yaml: 18.23 / 103.48
+
+
+@dataclass(frozen=True)
+class Measurement:
+    """One value with the provenance that goes into ``measurement_report.yaml``."""
+
+    value_cm: float
+    source: str
+    confidence: str
+    views: list[str] = field(default_factory=list)
+    edited: bool = False
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class MeasurementSet:
+    """Every measurement, plus the warnings the tailor should read."""
+
+    values: dict[str, Measurement]
+    warnings: list[str] = field(default_factory=list)
+
+    def body(self) -> dict[str, float]:
+        """Return the flat ``body:`` mapping for ``body_measurements.yaml``."""
+        return {name: entry.value_cm for name, entry in sorted(self.values.items())}
+
+
+@dataclass
+class SideView:
+    """One side view: its mask, its landmarks and its balance line."""
+
+    name: str
+    mask: np.ndarray
+    landmarks: dict[str, Landmark]
+
+    def balance_x(self, row: float) -> float:
+        """Return the x of the balance line at ``row``."""
+        return balance_x_at(row, self.landmarks["balance_top"], self.landmarks["balance_bottom"])
+
+    def depths(self, row: int, mm_per_px_x: float) -> tuple[float, float]:
+        """Return the (front, back) depth in mm at ``row``."""
+        centre = int(round(self.balance_x(row)))
+        run = run_containing(self.mask, row, centre)
+        if run is None:
+            return 0.0, 0.0
+        return (run[1] - centre + 1) * mm_per_px_x, (centre - run[0]) * mm_per_px_x
+
+    def edge(self, row: int, side: str) -> float | None:
+        """Return the x of the front or back edge at ``row``, or ``None`` off the body."""
+        centre = int(round(self.balance_x(row)))
+        run = run_containing(self.mask, row, centre)
+        if run is None:
+            return None
+        return float(run[1] if side == "front" else run[0])
+
+
+def _cm(mm: float) -> float:
+    """Round millimetres to centimetres, one decimal, as the contract requires."""
+    return round(mm / 10.0, 1)
+
+
+def _distance_mm(a: Landmark, b: Landmark, calibration: Calibration) -> float:
+    dx = (a.x - b.x) * calibration.mm_per_px_x
+    dy = (a.y - b.y) * calibration.mm_per_px_y
+    return math.hypot(dx, dy)
+
+
+def _height_mm(row: float, calibration: Calibration) -> float:
+    return height_of_row(int(round(row)), calibration.floor_row, calibration.mm_per_px_y)
+
+
+def _mean_depths(
+    sides: list[SideView], row: int, mm_per_px_x: float
+) -> tuple[float, float, list[float]]:
+    """Return the mean front and back depth over the side views, and each girth's input."""
+    fronts, backs = [], []
+    for side in sides:
+        front, back = side.depths(row, mm_per_px_x)
+        fronts.append(front)
+        backs.append(back)
+    return float(np.mean(fronts)), float(np.mean(backs)), fronts
+
+
+def _girth_at(
+    row: int, front_mask: np.ndarray, torso_x: int, sides: list[SideView], calibration: Calibration
+) -> tuple[float, float]:
+    """Return the two-semi-ellipse girth and the back arc in mm at ``row``."""
+    width = width_at(front_mask, row, torso_x, calibration.mm_per_px_x)
+    front, back, _ = _mean_depths(sides, row, calibration.mm_per_px_x)
+    return two_semi_ellipse_girth(width, front, back), back_arc(width, back)
+
+
+def _girth_spread_mm(
+    row: int, front_mask: np.ndarray, torso_x: int, sides: list[SideView], calibration: Calibration
+) -> float:
+    """Return how far the two side views disagree about a girth, in mm."""
+    if len(sides) <= 1:
+        return 0.0
+    width = width_at(front_mask, row, torso_x, calibration.mm_per_px_x)
+    girths = []
+    for side in sides:
+        front, back = side.depths(row, calibration.mm_per_px_x)
+        girths.append(two_semi_ellipse_girth(width, front, back))
+    return max(girths) - min(girths)
+
+
+def _edge_path(side: SideView, top_row: int, bottom_row: int, which: str) -> np.ndarray:
+    """Return the front or back edge between two rows as an ``(N, 2)`` pixel path."""
+    points = []
+    for row in range(int(top_row), int(bottom_row) + 1):
+        x = side.edge(row, which)
+        if x is not None:
+            points.append((x, float(row)))
+    return np.array(points, dtype=float) if points else np.zeros((0, 2))
+
+
+def _leg_girth_mm(
+    row: int, front_mask: np.ndarray, torso_x: int, sides: list[SideView], calibration: Calibration
+) -> float:
+    """Return one thigh's girth at ``row``: front run of one leg, side leg depth."""
+    runs = [run for run in runs_in_row(front_mask, row) if run[1] < torso_x]
+    if not runs:
+        return 0.0
+    leg = max(runs, key=lambda run: run[1] - run[0])
+    width = (leg[1] - leg[0] + 1) * calibration.mm_per_px_x
+    front, back, _ = _mean_depths(sides, row, calibration.mm_per_px_x)
+    return two_semi_ellipse_girth(width, front, back)
+
+
+def _angle_above_horizontal(a: Landmark, b: Landmark, calibration: Calibration) -> float:
+    """Return the angle in degrees of the segment a->b above the horizontal."""
+    dx = abs(a.x - b.x) * calibration.mm_per_px_x
+    dy = abs(a.y - b.y) * calibration.mm_per_px_y
+    return math.degrees(math.atan2(dy, dx)) if dx or dy else 0.0
+
+
+def _angle_from_vertical(a: Landmark, b: Landmark, calibration: Calibration) -> float:
+    """Return the angle in degrees of the segment a->b away from vertical."""
+    dx = abs(a.x - b.x) * calibration.mm_per_px_x
+    dy = abs(a.y - b.y) * calibration.mm_per_px_y
+    return math.degrees(math.atan2(dx, dy)) if dx or dy else 0.0
+
+
+def measure(
+    front_mask: np.ndarray,
+    front_landmarks: list[Landmark],
+    sides: list[SideView],
+    keypoints: np.ndarray,
+    calibration: Calibration,
+) -> MeasurementSet:
+    """Compute the 26 GarmentCode keys from landmarks and silhouettes.
+
+    Raises:
+        ValueError: if no side view is given, or a landmark the engine needs is
+            missing from ``front_landmarks``.
+
+    """
+    if not sides:
+        raise ValueError("at least one side view is required")
+    front = as_dict(front_landmarks)
+    missing = {"head_top", "waist_row", "armpit_row", "crotch_row"} - set(front)
+    if missing:
+        raise ValueError(f"missing front landmarks: {', '.join(sorted(missing))}")
+
+    side_names = [side.name for side in sides]
+    both = ["front", *side_names]
+    torso_x = int(round(front["waist_row"].x))
+    mm_x, mm_y = calibration.mm_per_px_x, calibration.mm_per_px_y
+    first = sides[0]
+
+    waist_row = int(round(front["waist_row"].y))
+    armpit = int(round(front["armpit_row"].y))
+    crotch = int(round(front["crotch_row"].y))
+    bust_row = int(round(first.landmarks["bust_row"].y))
+    underbust_row = int(round(first.landmarks["underbust_row"].y))
+    hip_row = int(round(first.landmarks["hip_row"].y))
+
+    values: dict[str, Measurement] = {}
+    warnings: list[str] = []
+
+    def add(
+        name: str,
+        value: float,
+        confidence: str,
+        views: list[str],
+        source: str = "geometric",
+        unit: str = "mm",
+    ) -> None:
+        """Store one value, converting mm to cm but leaving degrees alone."""
+        values[name] = Measurement(
+            _cm(value) if unit == "mm" else round(value, 1), source, confidence, views
+        )
+
+    # --- heights and lengths -------------------------------------------------
+    add("height", _height_mm(front["head_top"].y, calibration), "high", ["front"])
+    add(
+        "head_l",
+        _distance_mm(first.landmarks["nape"], first.landmarks["side_head_top"], calibration),
+        "medium",
+        [first.name],
+    )
+    add(
+        "neck_w",
+        _distance_mm(front["neck_base_left"], front["neck_base_right"], calibration),
+        "medium",
+        ["front"],
+    )
+    add(
+        "shoulder_w",
+        _distance_mm(front["shoulder_left"], front["shoulder_right"], calibration),
+        "medium",
+        ["front"],
+    )
+    add(
+        "shoulder_incl",
+        float(
+            np.mean(
+                [
+                    _angle_above_horizontal(
+                        front["neck_base_left"], front["shoulder_left"], calibration
+                    ),
+                    _angle_above_horizontal(
+                        front["neck_base_right"], front["shoulder_right"], calibration
+                    ),
+                ]
+            )
+        ),
+        "medium",
+        ["front"],
+        unit="deg",
+    )
+    add(
+        "armscye_depth",
+        float(
+            np.mean(
+                [
+                    _height_mm(front["shoulder_left"].y, calibration),
+                    _height_mm(front["shoulder_right"].y, calibration),
+                ]
+            )
+        )
+        - _height_mm(armpit, calibration),
+        "medium",
+        ["front"],
+    )
+
+    arm_lengths, pose_angles = [], []
+    for name, shoulder_index, elbow_index in (
+        ("left", L_SHOULDER, L_ELBOW),
+        ("right", R_SHOULDER, R_ELBOW),
+    ):
+        shoulder = front[f"shoulder_{name}"]
+        elbow = Landmark(
+            "elbow", "front", float(keypoints[elbow_index, 0]), float(keypoints[elbow_index, 1])
+        )
+        wrist_a = front[f"wrist_{name}_a"]
+        wrist_b = front[f"wrist_{name}_b"]
+        wrist = Landmark(
+            "wrist", "front", (wrist_a.x + wrist_b.x) / 2, (wrist_a.y + wrist_b.y) / 2
+        )
+        arm_lengths.append(
+            _distance_mm(shoulder, elbow, calibration) + _distance_mm(elbow, wrist, calibration)
+        )
+        keypoint_shoulder = Landmark(
+            "shoulder",
+            "front",
+            float(keypoints[shoulder_index, 0]),
+            float(keypoints[shoulder_index, 1]),
+        )
+        pose_angles.append(_angle_above_horizontal(keypoint_shoulder, elbow, calibration))
+
+    add("arm_length", float(np.mean(arm_lengths)), "medium", ["front"])
+    add("arm_pose_angle", float(np.mean(pose_angles)), "high", ["front"], unit="deg")
+
+    # --- girths --------------------------------------------------------------
+    for name, row, confidence in (
+        ("bust", bust_row, "medium"),
+        ("underbust", underbust_row, "low"),
+        ("waist", waist_row, "medium"),
+        ("hips", hip_row, "medium"),
+    ):
+        girth, arc = _girth_at(row, front_mask, torso_x, sides, calibration)
+        add(name, girth, confidence, both)
+        if name in ("bust", "waist", "hips"):
+            key = {
+                "bust": "back_width",
+                "waist": "waist_back_width",
+                "hips": "hip_back_width",
+            }[name]
+            add(key, arc, "low", both)
+        spread = _girth_spread_mm(row, front_mask, torso_x, sides, calibration)
+        if spread > GIRTH_DISAGREEMENT_MM:
+            warnings.append(
+                f"{name} depth differs {spread / 10:.1f} cm between the two side views"
+            )
+
+    thigh_rows = range(crotch, crotch + int(round(THIGH_DEPTH_MM / mm_y)) + 1)
+    leg_girths = [
+        _leg_girth_mm(row, front_mask, torso_x, sides, calibration)
+        for row in thigh_rows
+        if row < front_mask.shape[0]
+    ]
+    add("leg_circ", max(leg_girths, default=0.0), "medium", both)
+
+    wrist_width = _distance_mm(front["wrist_left_a"], front["wrist_left_b"], calibration)
+    wrist_width_right = _distance_mm(front["wrist_right_a"], front["wrist_right_b"], calibration)
+    add("wrist", math.pi * (wrist_width + wrist_width_right) / 2, "low", ["front"])
+
+    # --- contour lengths and vertical differences ----------------------------
+    nape = first.landmarks["nape"]
+    hps = first.landmarks["hps"]
+    add(
+        "waist_line",
+        contour_length(_edge_path(first, nape.y, waist_row, "back"), mm_x, mm_y),
+        "medium",
+        [first.name],
+    )
+    add(
+        "waist_over_bust_line",
+        hull_length(_edge_path(first, hps.y, waist_row, "front"), mm_x, mm_y),
+        "low",
+        [first.name],
+    )
+    add(
+        "bust_line",
+        hull_length(_edge_path(first, hps.y, bust_row, "front"), mm_x, mm_y),
+        "low",
+        [first.name],
+    )
+    add(
+        "vert_bust_line",
+        _height_mm(nape.y, calibration) - _height_mm(bust_row, calibration),
+        "medium",
+        [first.name],
+    )
+    add(
+        "hips_line",
+        _height_mm(waist_row, calibration) - _height_mm(hip_row, calibration),
+        "medium",
+        both,
+    )
+    add(
+        "crotch_hip_diff",
+        _height_mm(hip_row, calibration) - _height_mm(crotch, calibration),
+        "medium",
+        both,
+    )
+
+    inclinations = []
+    for name in ("left", "right"):
+        waist_run = run_containing(front_mask, waist_row, torso_x)
+        hip_run = run_containing(front_mask, hip_row, torso_x)
+        if waist_run is None or hip_run is None:
+            continue
+        index = 0 if name == "left" else 1
+        waist_edge = Landmark("w", "front", float(waist_run[index]), float(waist_row))
+        hip_edge = Landmark("h", "front", float(hip_run[index]), float(hip_row))
+        inclinations.append(_angle_from_vertical(waist_edge, hip_edge, calibration))
+    add(
+        "hip_inclination",
+        float(np.mean(inclinations or [0.0])),
+        "medium",
+        ["front"],
+        unit="deg",
+    )
+
+    # --- not visible in a silhouette ----------------------------------------
+    values["bust_points"] = Measurement(
+        round(values["bust"].value_cm * BUST_POINTS_RATIO, 1), "default_ratio", "estimated", []
+    )
+    values["bum_points"] = Measurement(
+        round(values["hips"].value_cm * BUM_POINTS_RATIO, 1), "default_ratio", "estimated", []
+    )
+
+    return MeasurementSet(values=values, warnings=warnings)
+
+
+def apply_overrides(
+    measurements: MeasurementSet, overrides: dict[str, dict[str, object]]
+) -> MeasurementSet:
+    """Return the set with the tailor's own values substituted in.
+
+    An overridden value keeps its schema confidence but is marked ``edited``, so
+    the report shows plainly which numbers a person chose rather than measured.
+    """
+    values = dict(measurements.values)
+    for name, edit in overrides.items():
+        if name not in values:
+            continue
+        current = values[name]
+        values[name] = Measurement(
+            value_cm=round(float(edit["value"]), 1),
+            source="tailor",
+            confidence=current.confidence,
+            views=current.views,
+            edited=True,
+            note=str(edit.get("note", "")),
+        )
+    return MeasurementSet(values=values, warnings=measurements.warnings)
