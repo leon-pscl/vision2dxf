@@ -20,8 +20,16 @@ examples/*.yaml ──▶ pattern_drafter ──▶ outputs/*.json
 ## Installation
 
 ```bash
+#linux
 python3 -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+```bash
+#ps
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
