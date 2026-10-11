@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pattern_drafter</title>
+<style>
+  :root {
+    --bg: #16181d; --panel: #1e2128; --line: #2f3440; --ink: #e8eaf0;
+    --muted: #9aa1b1; --accent: #6ea8fe; --bad: #ff8a80;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5
+    system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header { padding: 20px 24px 8px; }
+  h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: .02em; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  main {
+    display: grid; gap: 16px; padding: 16px 24px 40px; max-width: 1500px;
+    grid-template-columns: minmax(340px, 420px) 1fr;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px;
+  }
+  h2 {
+    margin: 0 0 12px; font-size: 12px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  label { display: block; margin-bottom: 10px; font-size: 13px; color: var(--muted); }
+  select, textarea, button, input[type=file] { font: inherit; width: 100%; }
+  select, textarea, input[type=number] {
+    margin-top: 4px; padding: 8px; color: var(--ink); background: #12141a;
+    border: 1px solid var(--line); border-radius: 6px;
+  }
+  textarea {
+    min-height: 260px; font-family: ui-monospace, Consolas, monospace;
+    font-size: 13px; resize: vertical;
+  }
+  button {
+    margin-top: 6px; padding: 10px; border: 0; border-radius: 6px;
+    background: var(--accent); color: #10131a; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: progress; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+  .check { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .check input { width: auto; }
+  .check label { margin: 0; }
+  #status { margin-top: 10px; font-size: 13px; color: var(--muted); min-height: 20px; }
+  #status.error { color: var(--bad); }
+  #preview { width: 100%; height: 560px; background: #fff; border-radius: 6px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .meta code { color: var(--ink); }
+  a.dl {
+    display: inline-block; margin-right: 8px; padding: 7px 12px; border-radius: 6px;
+    background: #12141a; border: 1px solid var(--line); color: var(--accent);
+    text-decoration: none; font-size: 13px;
+  }
+  ul.keys { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>pattern_drafter</h1>
+  <p>Body measurements in, drafted garment pattern out — JSON + printable PDF.</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>1 · Measurements</h2>
+    <input type="file" id="file" accept=".yaml,.yml,.txt">
+    <label style="margin-top:10px">body_measurements.yaml
+      <textarea id="yaml" spellcheck="false"></textarea>
+    </label>
+
+    <h2 style="margin-top:18px">2 · Garment</h2>
+    <label>Pattern
+      <select id="garment"></select>
+    </label>
+    <div class="row">
+      <label>Drafting method
+        <select id="variant"></select>
+      </label>
+      <label>Ease (cm)
+        <input id="ease" type="number" value="8" min="0" max="30" step="1">
+      </label>
+    </div>
+    <div class="check" id="dartsRow" hidden>
+      <input type="checkbox" id="darts">
+      <label for="darts">Add bust + waist darts</label>
+    </div>
+    <button id="go">Draft pattern</button>
+    <div id="status"></div>
+  </section>
+
+  <section class="card">
+    <h2>3 · Result</h2>
+    <div id="empty" class="meta">Nothing drafted yet.</div>
+    <div id="result" hidden>
+      <div id="links"></div>
+      <p id="summary" class="meta"></p>
+      <svg id="preview" xmlns="http://www.w3.org/2000/svg"></svg>
+      <p id="legend" class="meta"></p>
+      <details>
+        <summary class="meta">Estimated measurements</summary>
+        <ul id="estimated" class="keys"></ul>
+      </details>
+    </div>
+  </section>
+</main>
+
+<script>
+const SAMPLE = `body:
+  height: 167.0
+  bust: 85.8
+  underbust: 85.8
+  waist: 85.6
+  hips: 100.5
+  arm_length: 62.6
+  armscye_depth: 20.1
+  wrist: 16.2
+`;
+
+const $ = (id) => document.getElementById(id);
+let garments = [];
+
+async function loadGarments() {
+  garments = (await (await fetch('/api/garments')).json()).garments;
+  $('garment').innerHTML = garments
+    .map((g) => `<option value="${g.id}">${g.id} — ${g.description}</option>`)
+    .join('');
+  fillVariants();
+}
+
+function currentGarment() {
+  return garments.find((g) => g.id === $('garment').value);
+}
+
+function fillVariants() {
+  const g = currentGarment();
+  $('variant').innerHTML = g.variants
+    .map((v, i) => `<option value="${i}">${v.label}</option>`)
+    .join('');
+  $('dartsRow').hidden = !g.supports_darts;
+}
+
+async function run() {
+  const g = currentGarment();
+  const variant = g.variants[Number($('variant').value)];
+  const go = $('go');
+  go.disabled = true;
+  $('status').className = '';
+  $('status').textContent = 'Drafting…';
+
+  const started = performance.now();
+  try {
+    const response = await fetch('/api/pattern', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        measurements: $('yaml').value,
+        garment: g.id,
+        style: variant.style,
+        gender: variant.gender,
+        ease: Number($('ease').value),
+        darts: $('darts').checked,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || response.statusText);
+
+    $('status').textContent = `Done in ${((performance.now() - started) / 1000).toFixed(1)}s`;
+    show(data);
+  } catch (err) {
+    $('status').className = 'error';
+    $('status').textContent = err.message;
+  } finally {
+    go.disabled = false;
+  }
+}
+
+function show(data) {
+  const pattern = data.pattern;
+  const bounds = pattern.bounds;
+  const width = bounds.xmax - bounds.xmin;
+  const height = bounds.ymax - bounds.ymin;
+  const scale = 540 / Math.max(width, height);
+
+  const polygons = pattern.panels.map((panel) => {
+    const points = panel.vertices
+      .map(([x, y]) => `${((x - bounds.xmin) * scale + 10).toFixed(1)},${((bounds.ymax - y) * scale + 10).toFixed(1)}`)
+      .join(' ');
+    return `<polygon points="${points}" fill="none" stroke="#14161a" stroke-width="0.8"/>`;
+  });
+  const preview = $('preview');
+  preview.setAttribute('viewBox', `0 0 ${width * scale + 20} ${height * scale + 20}`);
+  preview.innerHTML = polygons.join('');
+
+  $('links').innerHTML = Object.entries(data.downloads)
+    .map(([fmt, url]) => `<a class="dl" href="${url}">Download ${fmt.toUpperCase()}</a>`)
+    .join('');
+  $('summary').innerHTML =
+    `<code>${data.name}</code> — ${pattern.panels.length} panels, ` +
+    `${width.toFixed(1)} × ${height.toFixed(1)} cm ` +
+    `(block <code>${data.reference}</code> scaled ×${data.scale})`;
+  $('legend').textContent = pattern.panels
+    .map((panel) => `${panel.name} (${panel.vertices.length} points)`)
+    .join(' · ');
+  $('estimated').innerHTML = Object.entries(pattern.input_measurements)
+    .filter(([key]) => !data.from_body.includes(key))
+    .map(([key, value]) => `<li>${key}: ${value} <em>(from ${data.reference})</em></li>`)
+    .join('') || '<li>none — every measurement came from the body file</li>';
+
+  $('empty').hidden = true;
+  $('result').hidden = false;
+}
+
+$('file').addEventListener('change', (event) => {
+  const file = event.target.files[0];
+  if (file) file.text().then((text) => ($('yaml').value = text));
+});
+$('garment').addEventListener('change', fillVariants);
+$('go').addEventListener('click', run);
+
+$('yaml').value = SAMPLE;
+loadGarments();
+</script>
+</body>
+</html>

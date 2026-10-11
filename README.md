@@ -15,6 +15,8 @@ Three base templates are supported out of the box: **bodice**, **skirt** and
 examples/*.yaml ──▶ pattern_drafter ──▶ outputs/*.json
                           │                    outputs/*.pdf
                           └── OpenPattern (drafting math)
+
+body_measurements.yaml ──▶ web app ──▶ pick a garment ──▶ JSON + PDF
 ```
 
 ## Installation
@@ -43,6 +45,25 @@ Actually drafting a pattern (`app.py build`) requires the full stack above.
 
 ## Quick start
 
+### Web app (Docker)
+
+```bash
+docker build -t pattern-drafter .
+docker run --rm -p 8000:8000 pattern-drafter
+```
+
+Open <http://localhost:8000>, drop a `body_measurements.yaml` (or paste one),
+pick a garment and a drafting method, then download the drafted pattern as
+JSON or a printable 1:1 PDF. The browser also draws a preview of every panel.
+
+### Without Docker
+
+```bash
+python web.py            # http://127.0.0.1:8000  (--host/--port to change)
+```
+
+### Command line
+
 ```bash
 # List the supported base templates and their available styles
 python app.py templates
@@ -53,6 +74,53 @@ python app.py check examples
 # Draft the examples: writes outputs/<profile_name>.json and .pdf
 python app.py build examples
 ```
+
+## Web app
+
+| Route | Description |
+|-------|-------------|
+| `GET /` | Single page UI (plain HTML, no build step). |
+| `GET /api/garments` | Garment / style / gender catalogue. |
+| `POST /api/pattern` | `{"measurements": "<yaml>", "garment": "bodice", "style": "Gilewska", "gender": "w", "ease": 8, "darts": false}`. |
+| `GET /download/<id>.json` · `.pdf` | Drafts from the last 20 requests, held in memory (lost on restart). |
+
+The response carries the pattern geometry (panels, construction points, bounds),
+the `from_body` keys and the `reference` block used, so the UI can tell measured
+values from estimated ones. Errors come back as `{"error": "..."}` with a 4xx
+status for bad input and 5xx when the drafting library fails.
+
+### Vision body measurements
+
+The web app accepts the vision pipeline output — a `body:` section with English
+keys in cm:
+
+```yaml
+body:
+  height: 167.0
+  bust: 85.8
+  underbust: 85.8
+  waist: 85.6
+  hips: 100.5
+  arm_length: 62.6
+  armscye_depth: 20.1
+  wrist: 16.2
+```
+
+A flat mapping or a `measurements:` section (a `pattern_drafter` YAML file) is
+accepted too, so the CLI examples can be pasted straight into the UI.
+
+OpenPattern needs far more measurements than that, so
+[`pattern_drafter/vision.py`](pattern_drafter/vision.py) fills the rest:
+
+1. values that mean the same thing in both vocabularies are copied over —
+   `bust`, `waist`, `hips`, `arm_length`, `armscye_depth`, `wrist`, `height`
+   (`underbust` and the pose/landmark keys have no counterpart and are dropped);
+2. the remaining keys are taken from the OpenPattern **reference profile** that
+   is complete for the chosen garment and closest to the subject's bust, waist
+   and hips, rescaled by the average ratio of those three girths;
+3. the body file always wins.
+
+The UI lists every value that came from step 2, so nothing is silently invented.
 
 ## Command line reference
 
@@ -190,8 +258,12 @@ waist/bust/hip guide lines and a 5 cm scale bar.
 ```
 .
 ├── app.py                         # CLI entry point
+├── web.py                         # web app (stdlib http.server)
+├── index.html                     # the single page UI
+├── Dockerfile
 ├── pattern_drafter/
 │   ├── measurements.py            # YAML parsing, validation, sqlite bridge
+│   ├── vision.py                  # vision body measurements -> OpenPattern keys
 │   ├── drafting.py                # OpenPattern integration + geometry extraction
 │   ├── export.py                  # JSON + PDF writers
 │   └── pipeline.py                # orchestration used by app.py and tests
@@ -244,4 +316,13 @@ pytest -q
 - Measurements are in centimetres; the native OpenPattern keys are used as-is.
 - Trousers are only implemented for the Donnanno style upstream.
 - Bodice darts (`darts: true`) call OpenPattern's `add_bust_dart` /
-  `add_waist_dart`; leave `darts: false` for the plain block.
+  `add_waist_dart`; leave `darts: false` for the plain block. The reference
+  profiles bundled with OpenPattern do not all record the bust height the dart
+  needs, so `bodice` + `Donnanno` + darts is rejected with the missing keys
+  instead of being drafted from a guess.
+- The vision pipeline measures girths and a few depths, not the vertical
+  construction lengths a block needs: those come from the nearest reference
+  profile, so results are a *draft* to measure against, not a made-to-measure
+  fit. Print the PDF and check it before cutting.
+- Drafts are held in memory for downloads only; restarting the container drops
+  them.

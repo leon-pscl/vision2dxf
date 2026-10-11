@@ -18,6 +18,7 @@ from .measurements import (
 from .drafting import draft_pattern, extract_pattern_data
 from .export import export_json, export_pdf
 from .pipeline import ProcessedPattern, iter_yaml_files, process_file
+from .vision import build_config, parse_body_measurements
 
 __all__ = [
     "MeasurementError",
@@ -31,6 +32,8 @@ __all__ = [
     "ProcessedPattern",
     "iter_yaml_files",
     "process_file",
+    "build_config",
+    "parse_body_measurements",
 ]
 
 __version__ = "1.0.0"

@@ -9,3 +9,9 @@ build/
 
 # Cloned third-party sources (GarmentCode)
 vendor/
+
+# Runtime user data (uploaded photos, sqlite db) - machine specific
+data/
+
+# Downloaded model weights
+models/

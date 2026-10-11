@@ -1,0 +1,16 @@
+.git
+.venv
+.claude
+.pytest_cache
+.ruff_cache
+__pycache__
+*.pyc
+outputs
+data
+models
+bench
+vendor
+tests
+examples
+*.md
+.gitignore
