@@ -39,7 +39,7 @@ RUN pip install --no-cache-dir -r requirements-bench.txt
 # used to fail with "model weights missing". The entrypoint fetches whatever
 # models/ is missing on start-up; nothing to bake into the image.
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
 
 COPY . .
 

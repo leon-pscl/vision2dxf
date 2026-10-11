@@ -2,7 +2,8 @@
 
 from bodymeasure.config import ROOT
 
-ENTRYPOINT = (ROOT / "docker" / "entrypoint.sh").read_text(encoding="utf-8")
+ENTRYPOINT_PATH = ROOT / "docker" / "entrypoint.sh"
+ENTRYPOINT = ENTRYPOINT_PATH.read_text(encoding="utf-8")
 DOCKERFILE = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 
 
@@ -18,3 +19,15 @@ def test_the_image_does_not_bake_the_weights() -> None:
     """The repository is bind-mounted over the image, so a baked copy is hidden."""
     assert "ultralytics import YOLO" not in DOCKERFILE
     assert "COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh" in DOCKERFILE
+
+
+def test_the_entrypoint_keeps_unix_line_endings() -> None:
+    """A CRLF shebang kills the container with "no such file or directory".
+
+    Linux reads the shebang literally, so the carriage return becomes part of the
+    interpreter's name and no such interpreter exists.
+    """
+    assert bytes([13, 10]) not in ENTRYPOINT_PATH.read_bytes()
+    assert r"sed -i 's/\r$//' /usr/local/bin/entrypoint.sh" in DOCKERFILE, (
+        "the image must survive a CRLF checkout too"
+    )
