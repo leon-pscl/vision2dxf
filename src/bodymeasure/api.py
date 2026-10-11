@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from bodymeasure import __version__
+from bodymeasure import __version__, store
 from bodymeasure.calibrate import (
     compute_intrinsics,
     compute_plane_scale,
@@ -28,7 +28,6 @@ from bodymeasure.session import (
     Subject,
     captured_views,
     create_session,
-    delete_session,
     export,
     measure_session,
     save_overrides,
@@ -40,7 +39,10 @@ from bodymeasure.vision import load_models, weights_available
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Load the YOLO26 models once, before the first request needs them."""
+    """Prepare the store and the models before the first request needs them."""
+    store.initialise()
+    if load_app_config().storage.purge_on_startup:
+        store.purge_images()
     if weights_available():
         load_models()
     yield
@@ -119,6 +121,7 @@ def health() -> dict[str, object]:
             "mm_per_px_y": calibration.mm_per_px_y,
         },
         "camera_rotation": config.camera.rotation,
+        "consent_version": config.storage.consent_version,
         "measurement_keys": sorted(load_schema()),
     }
 
@@ -175,14 +178,16 @@ async def calibration_scale(
 
 @app.post("/api/sessions", status_code=201)
 async def create_session_route(
-    subject_id: Annotated[str, Form()],
+    subject_code: Annotated[str, Form()],
     sex: Annotated[str, Form()],
     consent: Annotated[bool, Form()],
     notes: Annotated[str, Form()] = "",
 ) -> dict[str, str]:
     """Open a session. Consent must be ticked before any capture."""
     try:
-        session_id = create_session(Subject(id=subject_id, sex=sex, consent=consent, notes=notes))
+        session_id = create_session(
+            Subject(code=subject_code, sex=sex, consent=consent, notes=notes)
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"id": session_id}
@@ -284,14 +289,45 @@ async def export_report(session_id: str) -> FileResponse:
 
 @app.delete("/api/sessions/{session_id}")
 async def delete_session_route(session_id: str) -> dict[str, bool]:
-    """Delete the session folder and every image in it."""
+    """Delete the session folder, its row and every image in it."""
     try:
-        deleted = delete_session(session_id)
+        deleted = store.delete_session(session_id, reason="user_request")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail=f"no such session: {session_id}")
     return {"deleted": True}
+
+
+@app.get("/api/sessions")
+async def list_sessions_route(status: str | None = None) -> list[dict[str, object]]:
+    """List sessions from the index, newest first, optionally by status."""
+    return store.list_sessions(status)
+
+
+@app.post("/api/sessions/{session_id}/confirm")
+async def confirm_session(session_id: str) -> dict[str, object]:
+    """Mark the measurements checked by a tailor, which starts the retention clock."""
+    try:
+        store.set_status(session_id, "confirmed")
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    store.drop_debug(session_id)
+    session = store.get_session(session_id) or {}
+    return {
+        "status": session.get("status"),
+        "images_purge_after": session.get("images_purge_after"),
+    }
+
+
+@app.get("/api/export.csv")
+async def export_csv_route() -> FileResponse:
+    """Serve one row per confirmed session, for Objective 2 analysis."""
+    path = store.data_dir() / "export.csv"
+    store.export_csv(path)
+    return FileResponse(path, media_type="text/csv", filename="export.csv")
 
 
 # Mounted last so the /api routes above win.

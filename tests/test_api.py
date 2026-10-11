@@ -1,5 +1,7 @@
 """API skeleton and the calibration endpoints."""
 
+import uuid
+from datetime import date
 from pathlib import Path
 
 import cv2
@@ -16,7 +18,7 @@ from tests.synthetic.boards import (
 from tests.synthetic.people import make_person, make_side
 from tests.test_session import CALIBRATION as SESSION_CALIBRATION
 
-from bodymeasure import calibrate
+from bodymeasure import calibrate, store
 from bodymeasure import session as session_module
 from bodymeasure.api import app
 from bodymeasure.config import load_calibration
@@ -139,8 +141,10 @@ def station(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object
     """Return a calibrated station with vision stubbed, as in test_session."""
     front = make_person()
     sides = {name: make_side(name) for name in ("side_left", "side_right")}
-    monkeypatch.setattr(session_module, "sessions_root", lambda: tmp_path / "sessions")
+    monkeypatch.setattr(store, "sessions_root", lambda: tmp_path / "sessions")
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
     monkeypatch.setattr(session_module, "_require_calibration", lambda: SESSION_CALIBRATION)
+    store.initialise()
 
     def fake_analyse(image: np.ndarray) -> ViewAnalysis:
         for figure in (front, *sides.values()):
@@ -158,7 +162,7 @@ def _photo(mask: np.ndarray) -> np.ndarray:
 
 def _open_session() -> str:
     response = client.post(
-        "/api/sessions", data={"subject_id": "S014", "sex": "F", "consent": "true"}
+        "/api/sessions", data={"subject_code": "S014", "sex": "F", "consent": "true"}
     )
     assert response.status_code == 201, response.text
     return response.json()["id"]
@@ -195,7 +199,7 @@ def test_health_reports_the_calibration_for_the_floor_guide() -> None:
 
 def test_a_session_cannot_start_without_consent(station: dict[str, object]) -> None:
     response = client.post(
-        "/api/sessions", data={"subject_id": "S014", "sex": "F", "consent": "false"}
+        "/api/sessions", data={"subject_code": "S014", "sex": "F", "consent": "false"}
     )
     assert response.status_code == 422
     assert "consent is required" in response.json()["detail"]
@@ -203,7 +207,7 @@ def test_a_session_cannot_start_without_consent(station: dict[str, object]) -> N
 
 def test_a_subject_id_with_path_characters_is_refused(station: dict[str, object]) -> None:
     response = client.post(
-        "/api/sessions", data={"subject_id": "../etc", "sex": "F", "consent": "true"}
+        "/api/sessions", data={"subject_code": "../etc", "sex": "F", "consent": "true"}
     )
     assert response.status_code == 422
 
@@ -218,8 +222,16 @@ def test_capturing_a_view_returns_the_gate_verdict(station: dict[str, object]) -
 
 def test_capturing_into_a_missing_session_is_a_404(station: dict[str, object]) -> None:
     file = ("image", ("front.png", _png(_photo(station["front"].mask)), "image/png"))
-    response = client.post("/api/sessions/NOPE-20260101-000000/views/front", files=[file])
+    unknown = uuid.uuid4().hex
+    response = client.post(f"/api/sessions/{unknown}/views/front", files=[file])
     assert response.status_code == 404
+
+
+def test_a_malformed_session_id_is_refused(station: dict[str, object]) -> None:
+    """Only UUID hex reaches the filesystem, so a crafted id cannot traverse."""
+    file = ("image", ("front.png", _png(_photo(station["front"].mask)), "image/png"))
+    response = client.post("/api/sessions/not-a-uuid/views/front", files=[file])
+    assert response.status_code == 422
 
 
 def test_measure_returns_landmarks_and_the_26_keys(station: dict[str, object]) -> None:
@@ -354,3 +366,73 @@ def test_a_typed_value_survives_a_later_landmark_drag(station: dict[str, object]
 
     assert body["measurements"]["bum_points"]["value"] == 19.9
     assert body["measurements"]["bum_points"]["edited"] is True
+
+
+def test_the_index_lists_sessions_and_filters_by_status(station: dict[str, object]) -> None:
+    session_id = _capture_all(station, ("front", "side_left"))
+    client.post(f"/api/sessions/{session_id}/measure")
+
+    listed = client.get("/api/sessions").json()
+    assert [row["id"] for row in listed] == [session_id]
+    assert listed[0]["status"] == "measured"
+    assert listed[0]["views"] == ["front", "side_left"]
+    assert client.get("/api/sessions?status=confirmed").json() == []
+
+
+def test_confirming_starts_the_retention_clock(station: dict[str, object]) -> None:
+    session_id = _capture_all(station, ("front", "side_left"))
+    client.post(f"/api/sessions/{session_id}/measure")
+
+    body = client.post(f"/api/sessions/{session_id}/confirm").json()
+
+    assert body["status"] == "confirmed"
+    assert body["images_purge_after"] > date.today().isoformat()
+    assert not (session_module.session_dir(session_id) / "debug").exists(), (
+        "keep_debug_after_confirm is false"
+    )
+
+
+def test_confirming_an_unknown_session_is_a_404(station: dict[str, object]) -> None:
+    assert client.post(f"/api/sessions/{uuid.uuid4().hex}/confirm").status_code == 404
+
+
+def test_the_csv_export_covers_confirmed_sessions_only(station: dict[str, object]) -> None:
+    session_id = _capture_all(station, ("front", "side_left"))
+    client.post(f"/api/sessions/{session_id}/measure")
+    assert "S014" not in client.get("/api/export.csv").text
+
+    client.post(f"/api/sessions/{session_id}/confirm")
+    text = client.get("/api/export.csv").text
+
+    assert "S014" in text
+    assert session_id in text
+    assert text.splitlines()[0].count("_edited") == 26
+
+
+def test_edits_reach_the_audit_trail(station: dict[str, object]) -> None:
+    session_id = _capture_all(station, ("front", "side_left"))
+    first = client.post(f"/api/sessions/{session_id}/measure").json()
+    edited = [
+        {**mark, "y": mark["y"] - 40, "auto": False} if mark["name"] == "waist_row" else mark
+        for mark in first["landmarks"]
+    ]
+    client.put(f"/api/sessions/{session_id}/landmarks", json=edited)
+    client.put(
+        f"/api/sessions/{session_id}/values",
+        json={"bust_points": {"value": 17.4, "note": "tape"}},
+    )
+
+    trail = store.list_edits(session_id)
+    kinds = {entry["kind"] for entry in trail}
+    assert kinds == {"landmark", "value"}
+    assert any(entry["target"] == "front.waist_row" for entry in trail)
+    assert any(entry["note"] == "tape" for entry in trail)
+
+
+def test_deleting_through_the_api_records_the_reason(station: dict[str, object]) -> None:
+    session_id = _capture_all(station, ("front", "side_left"))
+    client.delete(f"/api/sessions/{session_id}")
+
+    deletions = store.list_deletions()
+    assert [entry["reason"] for entry in deletions] == ["user_request"]
+    assert [entry["scope"] for entry in deletions] == ["session"]

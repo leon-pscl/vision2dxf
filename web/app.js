@@ -134,6 +134,7 @@ function initCapture() {
         health.weights ? "models loaded" : "model weights missing from models/",
       ];
       el("station-status").textContent = parts.join(" · ");
+      el("consent-version").textContent = `consent form `;
     })
     .catch((error) => {
       el("station-status").textContent = `backend unreachable: ${error.message}`;
@@ -280,7 +281,7 @@ function initCapture() {
     const body = await post(
       "/api/sessions",
       form({
-        subject_id: el("subject-id").value.trim(),
+        subject_code: el("subject-id").value.trim(),
         sex: el("sex").value,
         consent: el("consent").checked,
       }),
@@ -516,6 +517,18 @@ function initReview() {
     }
     el("review-status").textContent = `${Object.keys(payload.measurements).length} measurements`;
   }
+
+  el("confirm-session").addEventListener("click", async () => {
+    const body = await post(
+      `/api/sessions/${sessionId}/confirm`,
+      new FormData(),
+      el("confirm-out"),
+    );
+    if (body) {
+      el("confirm-out").textContent =
+        `confirmed · photos deleted after ${body.images_purge_after}`;
+    }
+  });
 
   el("delete-session").addEventListener("click", async () => {
     if (!window.confirm(`Delete ${sessionId} and every photo in it?`)) return;

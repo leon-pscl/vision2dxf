@@ -345,3 +345,106 @@ every exported file without error.
 Do not guess. Stop and ask about anything not specified here, especially
 landmark definitions, thresholds, or new dependencies. List the assumption
 you would make, and wait for confirmation.
+
+## 10. Storage (add to Milestone 0)
+
+### 10.1 Approach
+- Files on disk hold the large and pipeline-facing data. A single SQLite database
+  (`data/app.db`, Python stdlib `sqlite3`, no ORM, no server) holds the index, consent and audit trail.
+- Never store images or YAML contents inside the database. Store only paths relative to `data/`.
+- All database access goes through `src/bodymeasure/store.py`. No other module opens
+  `app.db` or deletes session folders.
+
+### 10.2 Files (unchanged from section 4)
+data/sessions/<session_id>/
+  subject.yaml, front.jpg, side_left.jpg, side_right.jpg,
+  <view>_mask.png, <view>_kp.json, landmarks.json,
+  body_measurements.yaml, measurement_report.yaml, debug/
+
+- `session_id` = UUID4 hex. Never put the subject's name in a path or file name.
+- Write every file atomically: write `<name>.tmp`, then `os.replace` it to the final name.
+
+### 10.3 Database schema (create on startup if missing)
+PRAGMA journal_mode = WAL;
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id              TEXT PRIMARY KEY,           -- UUID4 hex = folder name
+  subject_code    TEXT NOT NULL,              -- tailor's client code, not a full name
+  sex             TEXT CHECK (sex IN ('M','F','other')),
+  consent_at      TEXT NOT NULL,              -- ISO 8601, Asia/Manila
+  consent_version TEXT NOT NULL,              -- version of the consent form text shown
+  created_at      TEXT NOT NULL,
+  status          TEXT NOT NULL CHECK (status IN
+                    ('capturing','measured','confirmed','exported')),
+  views           TEXT NOT NULL DEFAULT '[]', -- JSON list, e.g. ["front","side_left"]
+  confirmed_at    TEXT,
+  images_purge_after TEXT                     -- date after which photos and masks are deleted
+);
+
+CREATE TABLE IF NOT EXISTS edits (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  at          TEXT NOT NULL,
+  kind        TEXT NOT NULL CHECK (kind IN ('landmark','value')),
+  target      TEXT NOT NULL,                  -- landmark name or measurement key
+  old_value   TEXT,                           -- JSON
+  new_value   TEXT,                           -- JSON
+  note        TEXT
+);
+
+CREATE TABLE IF NOT EXISTS deletions (        -- no personal data, by design
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id  TEXT NOT NULL,                  -- no foreign key: the session row is gone
+  at          TEXT NOT NULL,
+  scope       TEXT NOT NULL CHECK (scope IN ('session','images')),
+  reason      TEXT NOT NULL CHECK (reason IN ('user_request','retention'))
+);
+
+### 10.4 store.py functions (type-hinted, each with a pytest test)
+create_session(subject_code, sex, consent_version) -> str
+add_view(session_id, view) -> None
+set_status(session_id, status) -> None
+log_edit(session_id, kind, target, old, new, note) -> None
+list_sessions(status: str | None = None) -> list[dict]
+delete_session(session_id, reason) -> None
+    # delete the folder, then the row, then insert into deletions,
+    # all inside one transaction; if the folder delete fails, roll back.
+purge_images(today) -> int
+    # for sessions whose images_purge_after <= today: delete the photos, masks and debug/
+    # but keep landmarks.json and both YAML files; log scope='images'.
+export_csv(path) -> None
+    # one row per confirmed session: session_id, subject_code, sex, then the 26 GarmentCode
+    # keys, then edited flags. Used for Objective 2 analysis.
+
+### 10.5 Configuration (config/app.yaml)
+storage:
+  data_dir: data
+  retention_days_images: 30       # placeholder; set from the client agreement
+  purge_on_startup: true          # run purge_images() whenever the app starts
+  keep_debug_after_confirm: false # delete debug/ once a session is confirmed
+
+`images_purge_after` = confirmed_at + retention_days_images.
+Sessions that were never confirmed are purged 7 days after created_at.
+
+### 10.6 API additions
+GET    /api/sessions?status=confirmed   -> list from store.list_sessions
+GET    /api/export.csv                  -> store.export_csv
+DELETE /api/sessions/{id}               -> store.delete_session(reason='user_request')
+
+### 10.7 Rules
+- Do not log subject codes, measurements or image paths to the console or log files;
+  log only session_id and event names.
+- No network sync, cloud backup or telemetry. Backup = copying the whole data/ folder,
+  documented in the README.
+- README section "Data protection": the station disk must be encrypted
+  (BitLocker on Windows), and the retention period must match the client's consent form.
+
+### 10.8 Tests
+- Creating, editing, confirming and deleting a session leaves no folder, no sessions row,
+  no edits rows, and exactly one deletions row.
+- purge_images deletes the photos but keeps body_measurements.yaml.
+- A crash simulated mid-write (exception after the .tmp write) leaves the previous file intact.
+- export_csv output contains no rows for unconfirmed sessions.

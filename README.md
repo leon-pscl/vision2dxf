@@ -161,11 +161,43 @@ mkdir -p models && mv yolo26s-*.pt models/
 the files. `GET /api/health` reports whether they were found, and the capture
 page shows it. Both models load once at startup, not per request.
 
-## Privacy
+## Data protection
 
-Subject images stay in `data/sessions/<id>/` on the station. `data/` and
-`config/calibration.yaml` are git-ignored. Capture requires a ticked consent
-checkbox, and each session can be deleted from the review page (M5/M6).
+- **Pseudonymous by construction.** A session folder is named by a UUID4, never
+  by the subject. Only the tailor's client code is stored, and only in the
+  index - never in a path, a URL or an access log.
+- **Consent is recorded, not assumed.** The server refuses to open a session
+  without it, and stores the time and the version of the consent text shown.
+- **Retention.** Photos, masks and keypoints are deleted
+  `retention_days_images` after a session is confirmed, and `unconfirmed_days`
+  after creation if it never was. `landmarks.json` and both YAML files survive,
+  so the record stays usable without the images. The purge runs on startup when
+  `purge_on_startup` is set; set the periods to match the client's consent form.
+- **Deletion is logged without personal data.** `deletions` records the session
+  id, time, scope and reason - nothing about the person.
+- **Encrypt the station disk.** BitLocker on Windows. Nothing here encrypts the
+  files themselves.
+- **No network.** No sync, cloud backup or telemetry. Backup means copying the
+  whole `data/` folder to encrypted media.
+- `data/` and `config/calibration.yaml` are git-ignored.
+
+## Storage
+
+Files hold the images and the YAML the pipeline consumes; a single SQLite
+database at `data/app.db` holds the index, consent and audit trail, and never an
+image or a YAML body (brief 10). Every database access and every session-folder
+deletion goes through [`src/bodymeasure/store.py`](src/bodymeasure/store.py).
+
+| Table | Holds |
+|---|---|
+| `sessions` | id, subject code, sex, consent time and version, status, views, purge date |
+| `edits` | every landmark move and typed value, with the old and new value |
+| `deletions` | what was deleted, when, and why - no personal data |
+
+Status runs `capturing` -> `measured` -> `confirmed` -> `exported`. Only
+confirmed sessions reach `GET /api/export.csv`, the one-row-per-session file for
+Objective 2. Every file is written to `<name>.tmp` and renamed into place, so an
+interrupted write leaves the previous file intact.
 
 ## Known limitations
 

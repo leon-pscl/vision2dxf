@@ -28,3 +28,11 @@ defaults:
 paths:
   sessions: data/sessions
   calib: data/calib
+
+storage:
+  data_dir: data
+  retention_days_images: 30       # placeholder; set from the client agreement
+  purge_on_startup: true          # run purge_images() whenever the app starts
+  keep_debug_after_confirm: false # delete debug/ once a session is confirmed
+  unconfirmed_days: 7             # never-confirmed sessions are purged this soon
+  consent_version: "2026-10-11"   # version of the consent text the capture page shows

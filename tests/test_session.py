@@ -13,13 +13,13 @@ import yaml
 from tests.synthetic.people import FLOOR_ROW, make_person, make_side
 
 from bodymeasure import session as session_module
+from bodymeasure import store
 from bodymeasure.config import Calibration, load_schema
 from bodymeasure.landmarks import as_dict
 from bodymeasure.session import (
     Subject,
     captured_views,
     create_session,
-    delete_session,
     export,
     find_landmarks,
     load_subject,
@@ -52,8 +52,10 @@ def station(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object
     front = make_person()
     sides = {name: make_side(name) for name in ("side_left", "side_right")}
 
-    monkeypatch.setattr(session_module, "sessions_root", lambda: tmp_path / "sessions")
+    monkeypatch.setattr(store, "sessions_root", lambda: tmp_path / "sessions")
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
     monkeypatch.setattr(session_module, "_require_calibration", lambda: CALIBRATION)
+    store.initialise()
 
     def fake_analyse(image: np.ndarray) -> ViewAnalysis:
         """Return the figure whose silhouette matches the image size and ink."""
@@ -67,7 +69,7 @@ def station(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object
 
 
 def _capture(station: dict[str, object], views: tuple[str, ...]) -> str:
-    subject = Subject(id="S014", sex="F", consent=True, notes="tight clothing")
+    subject = Subject(code="S014", sex="F", consent=True, notes="tight clothing")
     session_id = create_session(subject)
     for view in views:
         figure = station["front"] if view == "front" else station["sides"][view]
@@ -77,22 +79,24 @@ def _capture(station: dict[str, object], views: tuple[str, ...]) -> str:
 
 def test_consent_is_required_before_any_capture() -> None:
     with pytest.raises(ValueError, match="consent is required"):
-        create_session(Subject(id="S014", sex="F", consent=False))
+        create_session(Subject(code="S014", sex="F", consent=False))
 
 
-def test_a_subject_id_cannot_escape_the_sessions_folder() -> None:
+def test_a_subject_code_cannot_escape_the_sessions_folder() -> None:
     with pytest.raises(ValueError, match="letters, digits"):
-        create_session(Subject(id="../../etc", sex="F", consent=True))
-    with pytest.raises(ValueError, match="letters, digits"):
+        create_session(Subject(code="../../etc", sex="F", consent=True))
+    with pytest.raises(ValueError, match="UUID"):
         session_dir("../secrets")
 
 
 def test_a_session_records_its_subject(station: dict[str, object]) -> None:
     session_id = _capture(station, ("front",))
     subject = load_subject(session_id)
-    assert subject.id == "S014"
+    assert subject.code == "S014"
     assert subject.consent is True
-    assert session_id.startswith("S014-")
+    assert "S014" not in session_id, "a subject code must never appear in a path"
+    assert store.get_session(session_id)["subject_code"] == "S014"
+    assert store.get_session(session_id)["status"] == "capturing"
 
 
 def test_capturing_a_view_writes_image_mask_keypoints_and_overlay(
@@ -109,7 +113,7 @@ def test_capturing_a_view_writes_image_mask_keypoints_and_overlay(
 
 
 def test_a_good_front_capture_passes_the_gate(station: dict[str, object]) -> None:
-    subject = Subject(id="S014", sex="F", consent=True)
+    subject = Subject(code="S014", sex="F", consent=True)
     session_id = create_session(subject)
     result = save_view(session_id, "front", _photo(station["front"].mask))
     assert result.ok, result.reasons
@@ -195,16 +199,18 @@ def test_deleting_a_session_removes_every_image(station: dict[str, object]) -> N
     folder = session_dir(session_id)
     assert list(folder.glob("*.jpg"))
 
-    assert delete_session(session_id) is True
+    assert store.delete_session(session_id, reason="user_request") is True
     assert not folder.exists()
-    assert delete_session(session_id) is False
+    assert store.delete_session(session_id, reason="user_request") is False
 
 
 def test_an_uncalibrated_station_refuses_to_capture(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(session_module, "sessions_root", lambda: tmp_path / "sessions")
+    monkeypatch.setattr(store, "sessions_root", lambda: tmp_path / "sessions")
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
     monkeypatch.setattr(session_module, "load_calibration", lambda: None)
-    session_id = create_session(Subject(id="S020", sex="M", consent=True))
+    store.initialise()
+    session_id = create_session(Subject(code="S020", sex="M", consent=True))
     with pytest.raises(ValueError, match="not calibrated"):
         save_view(session_id, "front", np.zeros((10, 10, 3), dtype=np.uint8))

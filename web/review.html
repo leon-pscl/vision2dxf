@@ -50,12 +50,18 @@
     <section>
       <h2>Finish</h2>
       <p class="row">
+        <button id="confirm-session" type="button">Confirm measurements</button>
+        <output id="confirm-out" class="hint"></output>
+      </p>
+      <p class="row">
         <a id="download-body" href="#" download>Export body_measurements.yaml</a>
         <a id="download-report" href="#" download>Export measurement_report.yaml</a>
         <button id="delete-session" type="button" class="danger">Delete session</button>
       </p>
       <p class="hint">
-        Deleting removes the folder with every photo of this subject. It cannot be undone.
+        Confirming records that a tailor checked these values and starts the
+        retention clock on the photos. Deleting removes the folder with every
+        photo of this subject, and cannot be undone.
       </p>
     </section>
   </main>

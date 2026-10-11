@@ -10,16 +10,15 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 from dataclasses import asdict, dataclass
-from datetime import datetime
 from pathlib import Path
 
 import cv2
 import numpy as np
 import yaml
 
-from bodymeasure.config import ROOT, Calibration, load_app_config, load_calibration
+from bodymeasure import store
+from bodymeasure.config import Calibration, load_app_config, load_calibration
 from bodymeasure.landmarks import (
     Landmark,
     as_dict,
@@ -32,60 +31,57 @@ from bodymeasure.measure import MeasurementSet, SideView, apply_overrides, measu
 from bodymeasure.overlay import landmark_overlay, save, view_overlay
 from bodymeasure.posegate import GateResult, faces_right, gate_front, gate_side
 from bodymeasure.preprocess import prepare
+from bodymeasure.store import session_folder, write_atomic
 from bodymeasure.vision import analyse
 
 VIEWS = ("front", "side_left", "side_right")
-OVERRIDES_FILE = "value_overrides.json"
 SIDE_VIEWS = ("side_left", "side_right")
-SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+OVERRIDES_FILE = "value_overrides.json"
+SUBJECT_CODE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 MASK_MIDPOINT = 127  # a saved mask PNG is 0 or 255
 
 
 @dataclass(frozen=True)
 class Subject:
-    """Who is being measured, and their consent."""
+    """Who is being measured, and their consent.
 
-    id: str
+    ``code`` is the tailor's client code, never a full name: it is recorded in
+    the index, not in any path (brief 10.2).
+    """
+
+    code: str
     sex: str
     consent: bool
     notes: str = ""
-
-
-def sessions_root() -> Path:
-    """Return the folder holding every session."""
-    return ROOT / load_app_config().paths.sessions
 
 
 def session_dir(session_id: str) -> Path:
     """Return one session's folder.
 
     Raises:
-        ValueError: if the id could escape the sessions folder.
+        ValueError: if the id is not a UUID hex string.
 
     """
-    if not SAFE_ID.match(session_id):
-        raise ValueError("session id must be letters, digits, dashes or underscores")
-    return sessions_root() / session_id
+    return session_folder(session_id)
 
 
 def create_session(subject: Subject) -> str:
-    """Create a session folder and return its id.
+    """Record consent, create the session folder, and return its id.
 
     Raises:
-        ValueError: if consent is not given, or the subject id is unusable.
+        ValueError: if consent is not given, or the subject code is unusable.
 
     """
     if not subject.consent:
         raise ValueError("consent is required before any capture")
-    if not SAFE_ID.match(subject.id):
-        raise ValueError("subject id must be letters, digits, dashes or underscores")
+    if not SUBJECT_CODE.match(subject.code):
+        raise ValueError("subject code must be letters, digits, dashes or underscores")
 
-    session_id = f"{subject.id}-{datetime.now().astimezone():%Y%m%d-%H%M%S}"
+    consent_version = load_app_config().storage.consent_version
+    session_id = store.create_session(subject.code, subject.sex, consent_version)
     folder = session_dir(session_id)
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "subject.yaml").write_text(
-        yaml.safe_dump(asdict(subject), sort_keys=False), encoding="utf-8"
-    )
+    write_atomic(folder / "subject.yaml", yaml.safe_dump(asdict(subject), sort_keys=False))
     return session_id
 
 
@@ -100,15 +96,6 @@ def load_subject(session_id: str) -> Subject:
     if not path.exists():
         raise FileNotFoundError(f"no such session: {session_id}")
     return Subject(**yaml.safe_load(path.read_text(encoding="utf-8")))
-
-
-def delete_session(session_id: str) -> bool:
-    """Remove the session folder and everything in it. Returns whether it existed."""
-    folder = session_dir(session_id)
-    if not folder.exists():
-        return False
-    shutil.rmtree(folder)
-    return True
 
 
 def _require_calibration() -> Calibration:
@@ -162,9 +149,13 @@ def save_view(session_id: str, view: str, image: np.ndarray) -> GateResult:
 
     # A new capture invalidates any landmarks found from the old one.
     (folder / "landmarks.json").unlink(missing_ok=True)
-    cv2.imwrite(str(folder / f"{view}.jpg"), prepared)
-    cv2.imwrite(str(folder / f"{view}_mask.png"), mask.astype(np.uint8) * 255)
-    (folder / f"{view}_kp.json").write_text(json.dumps(keypoints.tolist()), encoding="utf-8")
+    write_atomic(folder / f"{view}.jpg", cv2.imencode(".jpg", prepared)[1].tobytes())
+    write_atomic(
+        folder / f"{view}_mask.png",
+        cv2.imencode(".png", mask.astype(np.uint8) * 255)[1].tobytes(),
+    )
+    write_atomic(folder / f"{view}_kp.json", json.dumps(keypoints.tolist()))
+    store.add_view(session_id, view)
     save(
         view_overlay(prepared, mask, keypoints, calibration.floor_row),
         folder / "debug" / f"{view}_gate.png",
@@ -249,9 +240,37 @@ def load_overrides(session_id: str) -> dict[str, dict[str, object]]:
 def save_overrides(session_id: str, overrides: dict[str, dict[str, object]]) -> Path:
     """Merge new tailor edits into the stored ones. Returns the path written."""
     path = session_dir(session_id) / OVERRIDES_FILE
-    merged = {**load_overrides(session_id), **overrides}
-    path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+    previous = load_overrides(session_id)
+    for name, edit in overrides.items():
+        store.log_edit(
+            session_id,
+            "value",
+            name,
+            previous.get(name, {}).get("value"),
+            edit.get("value"),
+            str(edit.get("note", "")),
+        )
+    merged = {**previous, **overrides}
+    write_atomic(path, json.dumps(merged, indent=2))
     return path
+
+
+def _log_landmark_moves(
+    session_id: str, before: list[Landmark], after: list[Landmark]
+) -> None:
+    """Record every landmark the tailor actually moved, in the audit trail."""
+    previous = {mark.name + mark.view: mark for mark in before}
+    for mark in after:
+        old = previous.get(mark.name + mark.view)
+        if old is None or (old.x, old.y) == (mark.x, mark.y):
+            continue
+        store.log_edit(
+            session_id,
+            "landmark",
+            f"{mark.view}.{mark.name}",
+            [old.x, old.y],
+            [mark.x, mark.y],
+        )
 
 
 def measure_session(session_id: str, landmarks: list[Landmark] | None = None) -> MeasurementSet:
@@ -263,11 +282,12 @@ def measure_session(session_id: str, landmarks: list[Landmark] | None = None) ->
     """
     folder = session_dir(session_id)
     calibration = _require_calibration()
+    path = folder / "landmarks.json"
     if landmarks is None:
-        path = folder / "landmarks.json"
         landmarks = load_landmarks(path) if path.exists() else find_landmarks(session_id)
     else:
-        save_landmarks(landmarks, folder / "landmarks.json")
+        _log_landmark_moves(session_id, load_landmarks(path) if path.exists() else [], landmarks)
+        save_landmarks(landmarks, path)
 
     front = _load_view(folder, "front")
     if front is None:
@@ -288,6 +308,8 @@ def measure_session(session_id: str, landmarks: list[Landmark] | None = None) ->
 
     front_marks = [mark for mark in landmarks if mark.view == "front"]
     measurements = measure(front_mask, front_marks, sides, front_kp, calibration)
+    if (store.get_session(session_id) or {}).get("status") == "capturing":
+        store.set_status(session_id, "measured")
     return apply_overrides(measurements, load_overrides(session_id))
 
 
@@ -298,14 +320,14 @@ def export(session_id: str, measurements: MeasurementSet) -> tuple[Path, Path]:
     underscore keys itself every time it loads the file.
     """
     folder = session_dir(session_id)
-    body_path = folder / "body_measurements.yaml"
-    body_path.write_text(
-        yaml.safe_dump({"body": measurements.body()}, sort_keys=True), encoding="utf-8"
+    body_path = write_atomic(
+        folder / "body_measurements.yaml",
+        yaml.safe_dump({"body": measurements.body()}, sort_keys=True),
     )
 
     subject = load_subject(session_id)
     report = {
-        "subject_id": subject.id,
+        "subject_id": subject.code,
         "side_views_used": [
             view.removeprefix("side_") for view in captured_views(session_id) if view != "front"
         ],
@@ -321,6 +343,7 @@ def export(session_id: str, measurements: MeasurementSet) -> tuple[Path, Path]:
         },
         "warnings": measurements.warnings,
     }
-    report_path = folder / "measurement_report.yaml"
-    report_path.write_text(yaml.safe_dump(report, sort_keys=False), encoding="utf-8")
+    report_path = write_atomic(
+        folder / "measurement_report.yaml", yaml.safe_dump(report, sort_keys=False)
+    )
     return body_path, report_path

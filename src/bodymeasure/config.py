@@ -40,6 +40,17 @@ class PathsConfig(_Strict):
     calib: str
 
 
+class StorageConfig(_Strict):
+    """Retention policy and the consent text version (brief 10.5)."""
+
+    data_dir: str
+    retention_days_images: int
+    purge_on_startup: bool
+    keep_debug_after_confirm: bool
+    unconfirmed_days: int
+    consent_version: str
+
+
 class AppConfig(_Strict):
     """Contents of ``config/app.yaml``."""
 
@@ -48,6 +59,7 @@ class AppConfig(_Strict):
     thresholds: dict[str, float]
     defaults: dict[str, float]
     paths: PathsConfig
+    storage: StorageConfig
 
 
 class Calibration(_Strict):
