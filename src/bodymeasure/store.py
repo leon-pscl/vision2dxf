@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   id              TEXT PRIMARY KEY,
   subject_code    TEXT NOT NULL,
   sex             TEXT CHECK (sex IN ('M','F','other')),
+  height_cm       REAL NOT NULL,
   consent_at      TEXT NOT NULL,
   consent_version TEXT NOT NULL,
   created_at      TEXT NOT NULL,
@@ -126,6 +127,19 @@ def initialise() -> None:
         stored = connection.execute("SELECT version FROM schema_version").fetchone()
         if stored is None:
             connection.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
+        _add_height_cm(connection)
+
+
+def _add_height_cm(connection: sqlite3.Connection) -> None:
+    """Give a database created before height-based scaling its missing column.
+
+    ``CREATE TABLE IF NOT EXISTS`` leaves an existing table alone, so a station
+    upgraded in place would otherwise fail on the first insert. Legacy rows get
+    0.0: they predate the column and were never measured by height.
+    """
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(sessions)")}
+    if "height_cm" not in columns:
+        connection.execute("ALTER TABLE sessions ADD COLUMN height_cm REAL NOT NULL DEFAULT 0.0")
 
 
 def write_atomic(path: Path, data: bytes | str) -> Path:
@@ -143,8 +157,8 @@ def write_atomic(path: Path, data: bytes | str) -> Path:
     return path
 
 
-def create_session(subject_code: str, sex: str, consent_version: str) -> str:
-    """Record consent and return a new session id.
+def create_session(subject_code: str, sex: str, consent_version: str, height_cm: float) -> str:
+    """Record consent and the measured height, and return a new session id.
 
     The id is a UUID4 hex string and is also the folder name, so no subject code
     ever appears in a path, a URL or an access log.
@@ -155,10 +169,10 @@ def create_session(subject_code: str, sex: str, consent_version: str) -> str:
     purge_after = (date.today() + timedelta(days=unconfirmed)).isoformat()
     with connect() as connection:
         connection.execute(
-            "INSERT INTO sessions (id, subject_code, sex, consent_at, consent_version,"
-            " created_at, status, views, images_purge_after)"
-            " VALUES (?, ?, ?, ?, ?, ?, 'capturing', '[]', ?)",
-            (session_id, subject_code, sex, now, consent_version, now, purge_after),
+            "INSERT INTO sessions (id, subject_code, sex, height_cm, consent_at,"
+            " consent_version, created_at, status, views, images_purge_after)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, 'capturing', '[]', ?)",
+            (session_id, subject_code, sex, height_cm, now, consent_version, now, purge_after),
         )
     return session_id
 

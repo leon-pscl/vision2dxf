@@ -3,10 +3,10 @@
 import math
 
 import pytest
-from tests.synthetic.people import FLOOR_ROW, make_person, make_side
+from tests.synthetic.people import make_person, make_side
 
-from bodymeasure.config import Calibration, load_schema
-from bodymeasure.landmarks import as_dict, find_front_landmarks, find_side_landmarks
+from bodymeasure.config import load_schema
+from bodymeasure.landmarks import as_dict, find_front_landmarks, find_side_landmarks, view_scale
 from bodymeasure.measure import (
     BUM_POINTS_RATIO,
     BUST_POINTS_RATIO,
@@ -15,26 +15,20 @@ from bodymeasure.measure import (
     measure,
 )
 
-CALIBRATION = Calibration(
-    camera_matrix=[[1400.0, 0.0, 450.0], [0.0, 1400.0, 900.0], [0.0, 0.0, 1.0]],
-    dist_coeffs=[0.0, 0.0, 0.0, 0.0, 0.0],
-    image_size=[900, 1800],
-    rotation=90,
-    mm_per_px_x=1.0,
-    mm_per_px_y=1.0,
-    floor_row=FLOOR_ROW,
-    calibrated_at="2026-10-11T10:00:00+08:00",
-)
+HEIGHT_CM = 164.5  # the drawn figure spans 1645 rows at 1 mm/px
 
 
-def _measure(side_names: tuple[str, ...] = ("side_left",)) -> MeasurementSet:
+def _measure(
+    side_names: tuple[str, ...] = ("side_left",), height_cm: float = HEIGHT_CM
+) -> MeasurementSet:
+    """Return the measurements of the drawn figure, front plus the given sides."""
     front = make_person()
-    front_marks = find_front_landmarks(front.mask, front.keypoints, CALIBRATION.mm_per_px_x)
+    front_marks = find_front_landmarks(front.mask, front.keypoints, height_cm)
     rows = as_dict(front_marks)
-    front_rows = {
-        "armpit": int(rows["armpit_row"].y),
-        "waist": int(rows["waist_row"].y),
-        "crotch": int(rows["crotch_row"].y),
+    scale = view_scale(front_marks, height_cm)
+    front_heights = {
+        name: scale.height_mm(rows[f"{name}_row"].y)
+        for name in ("armpit", "waist", "crotch")
     }
     sides = []
     for name in side_names:
@@ -44,11 +38,12 @@ def _measure(side_names: tuple[str, ...] = ("side_left",)) -> MeasurementSet:
                 name=name,
                 mask=side.mask,
                 landmarks=as_dict(
-                    find_side_landmarks(side.mask, side.keypoints, name, front_rows)
+                    find_side_landmarks(side.mask, side.keypoints, name, front_heights, height_cm)
                 ),
+                height_cm=height_cm,
             )
         )
-    return measure(front.mask, front_marks, sides, front.keypoints, CALIBRATION)
+    return measure(front.mask, front_marks, sides, front.keypoints, height_cm)
 
 
 @pytest.fixture(scope="module")
@@ -73,9 +68,12 @@ def test_the_angles_are_degrees_not_centimetres(result: MeasurementSet) -> None:
         assert 0.0 <= result.values[name].value_cm <= 90.0
 
 
-def test_the_height_matches_the_drawn_figure(result: MeasurementSet) -> None:
-    """The figure's head top is row 105 and the floor is row 1750, at 1 mm/px."""
-    assert result.values["height"].value_cm == pytest.approx(164.5, abs=0.5)
+def test_the_height_is_the_number_the_tailor_measured(result: MeasurementSet) -> None:
+    """Height is the input that sets the scale, not something derived from it."""
+    entry = result.values["height"]
+    assert entry.value_cm == HEIGHT_CM
+    assert entry.source == "tailor_input"
+    assert entry.confidence == "high"
 
 
 def test_the_arm_pose_angle_reports_the_drawn_a_pose(result: MeasurementSet) -> None:
@@ -143,14 +141,14 @@ def test_two_side_views_are_averaged_without_warning() -> None:
 
 def test_a_measurement_needs_at_least_one_side_view() -> None:
     front = make_person()
-    marks = find_front_landmarks(front.mask, front.keypoints, CALIBRATION.mm_per_px_x)
+    marks = find_front_landmarks(front.mask, front.keypoints, HEIGHT_CM)
     with pytest.raises(ValueError, match="at least one side view"):
-        measure(front.mask, marks, [], front.keypoints, CALIBRATION)
+        measure(front.mask, marks, [], front.keypoints, HEIGHT_CM)
 
 
 def test_missing_front_landmarks_are_named() -> None:
     front = make_person()
-    marks = find_front_landmarks(front.mask, front.keypoints, CALIBRATION.mm_per_px_x)
+    marks = find_front_landmarks(front.mask, front.keypoints, HEIGHT_CM)
     without_waist = [mark for mark in marks if mark.name != "waist_row"]
     side = make_side()
     view = SideView(
@@ -161,12 +159,14 @@ def test_missing_front_landmarks_are_named() -> None:
                 side.mask,
                 side.keypoints,
                 "side_left",
-                {"armpit": 430, "waist": 760, "crotch": 1000},
+                {"armpit": 1320.0, "waist": 990.0, "crotch": 750.0},
+                HEIGHT_CM,
             )
         ),
+        height_cm=HEIGHT_CM,
     )
     with pytest.raises(ValueError, match="waist_row"):
-        measure(front.mask, without_waist, [view], front.keypoints, CALIBRATION)
+        measure(front.mask, without_waist, [view], front.keypoints, HEIGHT_CM)
 
 
 def test_moving_the_waist_row_changes_only_what_depends_on_it() -> None:
@@ -174,26 +174,29 @@ def test_moving_the_waist_row_changes_only_what_depends_on_it() -> None:
     from dataclasses import replace
 
     front = make_person()
-    marks = find_front_landmarks(front.mask, front.keypoints, CALIBRATION.mm_per_px_x)
+    marks = find_front_landmarks(front.mask, front.keypoints, HEIGHT_CM)
     rows = as_dict(marks)
-    front_rows = {
-        "armpit": int(rows["armpit_row"].y),
-        "waist": int(rows["waist_row"].y),
-        "crotch": int(rows["crotch_row"].y),
+    scale = view_scale(marks, HEIGHT_CM)
+    front_heights = {
+        name: scale.height_mm(rows[f"{name}_row"].y)
+        for name in ("armpit", "waist", "crotch")
     }
     side = make_side()
     view = SideView(
         name="side_left",
         mask=side.mask,
-        landmarks=as_dict(find_side_landmarks(side.mask, side.keypoints, "side_left", front_rows)),
+        landmarks=as_dict(
+            find_side_landmarks(side.mask, side.keypoints, "side_left", front_heights, HEIGHT_CM)
+        ),
+        height_cm=HEIGHT_CM,
     )
-    before = measure(front.mask, marks, [view], front.keypoints, CALIBRATION).body()
+    before = measure(front.mask, marks, [view], front.keypoints, HEIGHT_CM).body()
 
     moved = [
         replace(mark, y=mark.y - 40, auto=False) if mark.name == "waist_row" else mark
         for mark in marks
     ]
-    after = measure(front.mask, moved, [view], front.keypoints, CALIBRATION).body()
+    after = measure(front.mask, moved, [view], front.keypoints, HEIGHT_CM).body()
 
     changed = {name for name in before if before[name] != after[name]}
     assert "waist" in changed

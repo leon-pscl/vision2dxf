@@ -10,14 +10,13 @@ from bodymeasure.geometry import (
     back_arc,
     contour_length,
     ellipse_perimeter,
-    height_of_row,
     hull_length,
-    row_for_height,
     run_containing,
     split_depth_at,
     two_semi_ellipse_girth,
     width_at,
 )
+from bodymeasure.landmarks import ViewScale
 
 
 def _integrated_perimeter(a: float, b: float, steps: int = 2_000_000) -> float:
@@ -103,9 +102,10 @@ def test_hull_length_bridges_a_hollow_but_keeps_a_bulge() -> None:
     assert hull_length(hollow, 1.0, 1.0, side="back") == pytest.approx(diagonal)
 
 
-def test_rows_and_heights_round_trip() -> None:
+def test_a_rows_and_heights_round_trip_on_a_views_scale() -> None:
+    """The scale is per view, so this round trip goes through ViewScale."""
     figure = make_figure()
+    scale = ViewScale(figure.floor_row, figure.floor_row - 1000, figure.mm_per_px_y)
     for name in SLICES:
         row = figure.row_of(name)
-        h_mm = height_of_row(row, figure.floor_row, figure.mm_per_px_y)
-        assert row_for_height(h_mm, figure.floor_row, figure.mm_per_px_y) == row
+        assert scale.row_of(scale.height_mm(row)) == row

@@ -1,4 +1,4 @@
-"""API skeleton and the calibration endpoints."""
+"""API skeleton: the session, capture, measure and export routes."""
 
 import uuid
 from datetime import date
@@ -9,22 +9,17 @@ import numpy as np
 import pytest
 import yaml
 from fastapi.testclient import TestClient
-from tests.synthetic.boards import (
-    PATTERN,
-    SQUARE_MM,
-    calibration_frames,
-    render_upright_board,
-)
 from tests.synthetic.people import make_person, make_side
-from tests.test_session import CALIBRATION as SESSION_CALIBRATION
 
-from bodymeasure import calibrate, store
 from bodymeasure import session as session_module
+from bodymeasure import store
 from bodymeasure.api import app
-from bodymeasure.config import load_calibration
+from bodymeasure.config import Calibration
 from bodymeasure.vision import ViewAnalysis
 
 client = TestClient(app)
+
+HEIGHT_CM = 164.5
 
 
 def test_health() -> None:
@@ -44,106 +39,14 @@ def _png(image: np.ndarray) -> bytes:
 
 
 @pytest.fixture
-def calib_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
-    """Point both calibration artefacts at a temporary directory."""
-    intrinsics = tmp_path / "intrinsics.yaml"
-    calibration = tmp_path / "calibration.yaml"
-    monkeypatch.setattr(calibrate, "_intrinsics_path", lambda: intrinsics)
-    monkeypatch.setattr(calibrate, "calibration_path", lambda: calibration)
-    return {"intrinsics": intrinsics, "calibration": calibration}
-
-
-def _board_params() -> dict[str, float | int]:
-    return {
-        "pattern_cols": PATTERN[0],
-        "pattern_rows": PATTERN[1],
-        "square_mm": SQUARE_MM,
-    }
-
-
-def test_checkerboard_endpoint_returns_and_parks_intrinsics(calib_paths: dict[str, Path]) -> None:
-    frames = [
-        ("frames", (f"f{index}.png", _png(frame), "image/png"))
-        for index, frame in enumerate(calibration_frames())
-    ]
-    response = client.post("/api/calibration/checkerboard", files=frames, data=_board_params())
-    body = response.json()
-
-    assert response.status_code == 200, body
-    assert body["frames_used"] >= 10
-    # app.yaml rotates frames 90 degrees, so the calibrated size is portrait.
-    assert body["image_size"] == [900, 1200]
-    assert body["rms_px"] < 1.0
-    assert calib_paths["intrinsics"].exists()
-
-
-def test_checkerboard_endpoint_explains_too_few_boards(calib_paths: dict[str, Path]) -> None:
-    blank = np.full((900, 1200, 3), 255, dtype=np.uint8)
-    frames = [("frames", (f"f{index}.png", _png(blank), "image/png")) for index in range(3)]
-
-    response = client.post("/api/calibration/checkerboard", files=frames, data=_board_params())
-
-    assert response.status_code == 422
-    assert "need 10" in response.json()["detail"]
-    assert not calib_paths["intrinsics"].exists()
-
-
-def test_scale_endpoint_shows_numbers_without_saving(calib_paths: dict[str, Path]) -> None:
-    board = ("frame", ("board.png", _png(render_upright_board()), "image/png"))
-
-    response = client.post("/api/calibration/scale", files=[board], data=_board_params())
-    body = response.json()
-
-    assert response.status_code == 200, body
-    assert body["saved"] is False
-    assert body["corners_found"] == PATTERN[0] * PATTERN[1]
-    assert body["mm_per_px_x"] == pytest.approx(SQUARE_MM / 60, rel=0.02)
-    assert not calib_paths["calibration"].exists()
-
-
-def test_scale_endpoint_saves_the_station_calibration(calib_paths: dict[str, Path]) -> None:
-    frames = [
-        ("frames", (f"f{index}.png", _png(frame), "image/png"))
-        for index, frame in enumerate(calibration_frames())
-    ]
-    client.post("/api/calibration/checkerboard", files=frames, data=_board_params())
-    board = ("frame", ("board.png", _png(render_upright_board()), "image/png"))
-
-    response = client.post(
-        "/api/calibration/scale",
-        files=[board],
-        data={**_board_params(), "save": "true", "bottom_margin_mm": 20.0},
-    )
-    body = response.json()
-
-    assert response.status_code == 200, body
-    assert body["saved"] is True
-    saved = load_calibration(calib_paths["calibration"])
-    assert saved is not None
-    assert saved.rotation == 90
-    assert saved.floor_row == body["floor_row"]
-
-
-def test_scale_endpoint_refuses_to_save_without_intrinsics(calib_paths: dict[str, Path]) -> None:
-    board = ("frame", ("board.png", _png(render_upright_board()), "image/png"))
-
-    response = client.post(
-        "/api/calibration/scale", files=[board], data={**_board_params(), "save": "true"}
-    )
-
-    assert response.status_code == 409
-    assert "checkerboard step first" in response.json()["detail"]
-    assert not calib_paths["calibration"].exists()
-
-
-@pytest.fixture
 def station(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
-    """Return a calibrated station with vision stubbed, as in test_session."""
+    """Return a station with its sessions and vision stubbed, as in test_session."""
     front = make_person()
     sides = {name: make_side(name) for name in ("side_left", "side_right")}
     monkeypatch.setattr(store, "sessions_root", lambda: tmp_path / "sessions")
     monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
-    monkeypatch.setattr(session_module, "_require_calibration", lambda: SESSION_CALIBRATION)
+    # An uncorrected station: frames are rotated but not undistorted.
+    monkeypatch.setattr(session_module, "load_calibration", lambda: Calibration(rotation=0))
     store.initialise()
 
     def fake_analyse(image: np.ndarray) -> ViewAnalysis:
@@ -160,9 +63,15 @@ def _photo(mask: np.ndarray) -> np.ndarray:
     return np.where(mask[..., None], 90, 230).astype(np.uint8).repeat(3, axis=2)
 
 
-def _open_session() -> str:
+def _open_session(height_cm: float = HEIGHT_CM) -> str:
     response = client.post(
-        "/api/sessions", data={"subject_code": "S014", "sex": "F", "consent": "true"}
+        "/api/sessions",
+        data={
+            "subject_code": "S014",
+            "sex": "F",
+            "consent": "true",
+            "height_cm": str(height_cm),
+        },
     )
     assert response.status_code == 201, response.text
     return response.json()["id"]
@@ -191,23 +100,46 @@ def test_the_capture_page_offers_consent_and_three_views() -> None:
     assert 'id="measure"' in page
 
 
-def test_health_reports_the_calibration_for_the_floor_guide() -> None:
+def test_health_reports_whether_the_lens_is_corrected() -> None:
     body = client.get("/api/health").json()
-    assert "calibration" in body
-    assert body["calibration"] is None or "floor_row" in body["calibration"]
+    assert isinstance(body["calibrated"], bool)
+    assert "camera_rotation" in body
 
 
 def test_a_session_cannot_start_without_consent(station: dict[str, object]) -> None:
     response = client.post(
-        "/api/sessions", data={"subject_code": "S014", "sex": "F", "consent": "false"}
+        "/api/sessions",
+        data={
+            "subject_code": "S014",
+            "sex": "F",
+            "consent": "false",
+            "height_cm": str(HEIGHT_CM),
+        },
     )
     assert response.status_code == 422
     assert "consent is required" in response.json()["detail"]
 
 
+def test_a_session_cannot_start_without_a_plausible_height(
+    station: dict[str, object],
+) -> None:
+    response = client.post(
+        "/api/sessions",
+        data={"subject_code": "S014", "sex": "F", "consent": "true", "height_cm": "250"},
+    )
+    assert response.status_code == 422
+    assert "height must be" in response.json()["detail"]
+
+
 def test_a_subject_id_with_path_characters_is_refused(station: dict[str, object]) -> None:
     response = client.post(
-        "/api/sessions", data={"subject_code": "../etc", "sex": "F", "consent": "true"}
+        "/api/sessions",
+        data={
+            "subject_code": "../etc",
+            "sex": "F",
+            "consent": "true",
+            "height_cm": str(HEIGHT_CM),
+        },
     )
     assert response.status_code == 422
 

@@ -5,6 +5,11 @@ This renders them, runs the engine, and reports the error. **The thresholds in
 `config/app.yaml` are not tuned to these bodies** (brief M4b): five bodies cannot
 justify a threshold, and fitting them would only hide the real error.
 
+Each body's **published `height` is fed in as the scale**, because that is what
+the app does: the engine turns the head-to-floor pixel span into millimetres with
+the operator's measured height. The five bodies are 165-179 cm, so the bench
+exercises five different scales rather than one.
+
 ## Running it
 
 ```bash
@@ -28,20 +33,22 @@ Mean absolute error over the five bodies, in cm (degrees for the three angles):
 
 | Good (< 3 cm) | | Fair (3-8 cm) | | Poor (> 8 cm) | |
 |---|---|---|---|---|---|
-| height | 0.4 | neck_w | 3.2 | hips | 10.5 |
-| back_width | 0.9 | hip_back_width | 3.4 | shoulder_w | 10.7 |
-| arm_pose_angle | 1.5 | leg_circ | 4.0 | shoulder_incl | 11.8 |
-| armscye_depth | 1.5 | head_l | 4.6 | bust_line | 12.0 |
-| bust_points | 1.5 | vert_bust_line | 7.3 | waist_over_bust_line | 12.1 |
-| bum_points | 1.8 | | | hips_line | 13.5 |
-| bust | 2.4 | | | arm_length | 14.4 |
-| wrist | 2.5 | | | waist_line | 17.8 |
-| hip_inclination | 2.8 | | | crotch_hip_diff | 22.7 |
-| underbust | 2.9 | | | | |
-| waist | 3.0 | | | | |
+| height | 0.0 | neck_w | 3.2 | hips | 10.8 |
+| back_width | 1.0 | underbust | 3.1 | shoulder_w | 10.8 |
+| bust_points | 1.5 | wrist | 2.4 | shoulder_incl | 11.8 |
+| arm_pose_angle | 1.5 | hip_inclination | 2.8 | bust_line | 12.0 |
+| armscye_depth | 1.6 | hip_back_width | 3.4 | waist_over_bust_line | 12.2 |
+| bum_points | 1.8 | bust | 2.2 | hips_line | 13.5 |
+| | | leg_circ | 4.1 | arm_length | 14.4 |
+| | | head_l | 4.6 | waist_line | 17.7 |
+| | | vert_bust_line | 7.3 | crotch_hip_diff | 22.7 |
+| | | waist | 2.9 | | |
 
-The girths the method exists to produce - bust, underbust, waist - land within
-3 cm, and height within 4 mm. The poor column is dominated by three causes.
+`height` errs by exactly zero, and that is not a result: since height-based
+scaling it is an **input**, not a measurement, so it is as accurate as the number
+the operator typed. The girths the method exists to produce - bust, underbust,
+waist - still land within about 3 cm. The poor column is dominated by three
+causes, none of them the scale.
 
 ### 1. The curvature search picks the wrong corner
 

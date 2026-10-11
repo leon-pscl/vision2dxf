@@ -5,7 +5,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from bodymeasure.config import Calibration
+from bodymeasure.config import Calibration, load_app_config
 
 _ROTATIONS = {
     90: cv2.ROTATE_90_CLOCKWISE,
@@ -44,7 +44,7 @@ def rotate(image: np.ndarray, degrees: int) -> np.ndarray:
 
 
 def undistort(image: np.ndarray, calibration: Calibration) -> np.ndarray:
-    """Undistort an already-rotated frame with the stored intrinsics."""
+    """Undistort an already-rotated frame with the stored lens model."""
     return cv2.undistort(
         image,
         np.array(calibration.camera_matrix, dtype=float),
@@ -52,6 +52,16 @@ def undistort(image: np.ndarray, calibration: Calibration) -> np.ndarray:
     )
 
 
-def prepare(image: np.ndarray, calibration: Calibration) -> np.ndarray:
-    """Rotate then undistort, the sequence every later step assumes."""
-    return undistort(rotate(image, calibration.rotation), calibration)
+def prepare(image: np.ndarray, calibration: Calibration | None) -> np.ndarray:
+    """Rotate, then undistort if the station has a lens model.
+
+    Rotation comes from the calibration file when there is one and from
+    ``config/app.yaml`` otherwise, so an uncorrected station still gets portrait
+    frames the pose gate can use.
+    """
+    config = load_app_config()
+    degrees = calibration.rotation if calibration else config.camera.rotation
+    rotated = rotate(image, degrees)
+    if calibration and calibration.has_lens_model:
+        return undistort(rotated, calibration)
+    return rotated

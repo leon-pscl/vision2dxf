@@ -4,6 +4,9 @@ Every function here is deterministic and free of I/O, model calls and
 configuration lookups, so it can be tested against synthetic silhouettes with
 known answers. Masks are boolean arrays indexed ``[row, column]``; scales are
 passed in explicitly. Internal unit is millimetres (float).
+
+Converting between an image row and a height above the floor is not here: it
+belongs to a view, and is ``landmarks.ViewScale``.
 """
 
 from __future__ import annotations
@@ -13,19 +16,6 @@ import math
 import numpy as np
 
 Run = tuple[int, int]
-
-
-def row_for_height(h_mm: float, floor_row: int, mm_per_px_y: float) -> int:
-    """Return the image row whose height above the floor is ``h_mm``.
-
-    Front and side views are matched by height, never by pixel row (brief 5.4).
-    """
-    return int(round(floor_row - h_mm / mm_per_px_y))
-
-
-def height_of_row(y: int, floor_row: int, mm_per_px_y: float) -> float:
-    """Return the height above the floor, in mm, of image row ``y``."""
-    return (floor_row - y) * mm_per_px_y
 
 
 def run_containing(mask: np.ndarray, y: int, x_ref: int) -> Run | None:

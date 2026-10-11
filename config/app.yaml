@@ -16,8 +16,9 @@ thresholds:
   arm_angle_min_deg: 20       # A-pose: upper arm away from torso line
   arm_angle_max_deg: 45
   side_shoulder_ratio_max: 0.25   # side view is side-on when shoulder span < 25% of front
-  frame_margin_frac: 0.02         # mask must sit this far inside top and bottom
-  floor_row_tol_px: 15            # lowest mask row vs calibrated floor_row
+  frame_margin_frac: 0.08         # mask must sit this far inside top and bottom
+  body_height_frac: 0.70          # and span at least this much of the frame height
+  body_centre_band_frac: 0.30     # body centre must fall inside the middle of the width
   morph_kernel_px: 5
   hole_fill_max_area_px: 500
 
@@ -27,7 +28,6 @@ defaults:
 
 paths:
   sessions: data/sessions
-  calib: data/calib
 
 storage:
   data_dir: data

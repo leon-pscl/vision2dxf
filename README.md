@@ -4,10 +4,11 @@ Local web app that turns a front photo plus at least one side photo into
 GarmentCode body parameters, using silhouette geometry only — no machine-learned
 measurement model. Full specification: [docs/AGENT_BRIEF.md](docs/AGENT_BRIEF.md).
 
-**Status: complete (M0-M6 and the M4b bench).** Calibration, YOLO26 segmentation
-and pose, the pose gate, landmark search, the 26 GarmentCode keys, the capture
-and review pages, and the bench against the five GarmentCode reference bodies.
-Measured accuracy and its limits: [bench/README.md](bench/README.md).
+**Status: complete (M0-M6 and the M4b bench).** YOLO26 segmentation and pose, the
+pose gate, landmark search, the 26 GarmentCode keys, the capture and review
+pages, and the bench against the five GarmentCode reference bodies. The image
+scale is the subject's measured height, so there is no station calibration and no
+floor mark. Measured accuracy and its limits: [bench/README.md](bench/README.md).
 
 ## Run it (Docker — nothing else to install)
 
@@ -58,24 +59,52 @@ After changing `requirements.txt`: `conda env update -f environment.yml`.
 `src/` is put on the path by `pyproject.toml` (`pythonpath`), so nothing needs
 installing in editable mode.
 
-## Calibration procedure
+## Where the scale comes from
 
-Open `/calibrate.html` and work top to bottom. Enter the board geometry first:
-the counts are **inner** corners, so a 10x7-square board is 9x6.
+**The subject's measured height.** There is no calibration step and nothing to
+stand on. Each view is scaled on its own:
 
-1. **Intrinsics.** Start the camera, then hold the checkerboard at 15-20
-   different angles, distances and positions in the frame. Grab a frame at each.
-   Vary the distance - boards all held at one depth leave the distortion terms
-   badly conditioned. Press *Compute intrinsics* and check `rms_px`: below ~0.5
-   is good, above ~1.0 means reshoot.
-2. **Scale.** Stand the board upright on the floor mark, square to the camera.
-   Measure from the board's lowest inner corners down to its bottom edge and
-   enter that as the bottom margin. Press *Measure scale*, check `mm_per_px_x`
-   and `mm_per_px_y` agree within about 1%, then *Save calibration*.
+```
+floor_row = lowest foreground row of the mask
+head_row  = highest  foreground row of the mask
+mm_per_px = height_cm * 10 / (floor_row - head_row)
+```
 
-Step 1 parks its result in `data/calib/intrinsics.yaml`; step 2 combines the two
-into `config/calibration.yaml`. Nothing is written until you press save. Either
-step also accepts uploaded image files instead of the webcam.
+That is the whole rule. `height_cm` is measured by the tailor, shoes off, to
+0.1 cm, and it scales every millimetre the engine reports. Front and side rows
+are matched by the height above the floor in millimetres, never by pixel row, so
+the two views do not have to be the same size in the frame.
+
+**Loose hair breaks it.** The head row is whatever is highest in the mask, so hair
+or a cap makes the body measure short. `head_row` is a draggable landmark in the
+review page: drag it down to the top of the skull and every measurement from
+that view is recomputed.
+
+A one-centimetre error in the height moves every measurement by about
+`1 / height` — under a centimetre on a 170 cm subject, which is why the tailor's
+number and not the client's own estimate.
+
+## Optional: correcting the lens
+
+The station runs uncorrected by default. Frames are measured as they arrive and
+`measurement_report.yaml` carries the warning `lens distortion not corrected`.
+
+To correct it, without buying a calibration board:
+
+```bash
+python tools/calibrate_lens_on_monitor.py
+```
+
+It draws a checkerboard **on the station monitor** and asks for the screen's
+visible width in millimetres, which makes the board's physical size known. It
+then shows the board at 16 tilted positions, grabs a frame of each with the
+camera, and `cv2.calibrateCamera` writes `camera_matrix` and `dist_coeffs` to
+`config/calibration.yaml`. Run it on the station with nothing else on screen and
+the room lit evenly. Nothing is written unless the fit's residual is under one
+pixel.
+
+`config/calibration.yaml` then holds only `camera_matrix`, `dist_coeffs` and
+`rotation`. There is no scale in it: the scale comes from the height.
 
 ## Layout
 
@@ -83,25 +112,30 @@ step also accepts uploaded image files instead of the webcam.
 |---|---|
 | `config/app.yaml` | model paths, thresholds, camera index and rotation |
 | `config/schema.yaml` | the 26 GarmentCode keys, their units, views and default confidence |
-| `config/calibration.yaml` | written by the calibration page (M2); git-ignored |
-| `src/bodymeasure/` | `config.py`, `api.py` today; vision, geometry and measurement modules per milestone |
+| `config/calibration.yaml` | optional lens model, written by the monitor tool; git-ignored |
+| `src/bodymeasure/` | `api.py`, `session.py`, `landmarks.py`, `measure.py`, `geometry.py`, and the rest |
+| `tools/` | the optional on-monitor lens calibration, a separate milestone |
 | `web/` | plain HTML/CSS/JS, no build step |
-| `tests/` | pytest; `synthetic/` holds generated silhouettes with known answers (M1) |
-| `data/` | sessions and calibration captures — git-ignored, never committed |
+| `tests/` | pytest; `synthetic/` holds generated silhouettes with known answers |
+| `data/` | sessions and the index — git-ignored, never committed |
 
 ## Capture procedure
 
 Open `/` and work down the page.
 
-1. **Subject.** Enter the id and sex, tick consent, press *Start session*. No
-   image is captured until consent is ticked; the server refuses otherwise.
+1. **Subject.** Enter the id, sex and **height**, tick consent, press *Start
+   session*. No image is captured until consent is ticked; the server refuses
+   otherwise, and it refuses a height outside 100-220 cm.
 2. **Camera.** Press *Start camera*. The preview is rotated to match the
-   calibrated rotation, so what you see is what gets measured. The red line is
-   the floor mark and the green outline is where the body should sit.
-3. **Captures.** Tight clothing, A-pose with the arms 20-45 degrees from the
-   body, standing on the floor mark. Each *Capture* button counts down from
-   three. The server segments the frame and runs the pose gate: a tick means the
-   view is usable, otherwise the reasons appear and *Retake* clears it.
+   configured rotation, so what you see is what gets measured. The yellow box is
+   where the body must sit: 8% clear top and bottom, filling at least 70% of the
+   frame, and within the middle third across.
+3. **Captures.** On screen, and worth reading to the subject:
+   **shoes off**; **hair tied flat or a tight cap**; **fitted clothing**, no thick
+   layers; **A-pose**, arms 20-45 degrees from the body and not touching it. Each
+   *Capture* button counts down from three. The server segments the frame and
+   runs the pose gate: a tick means the view is usable, otherwise the reasons
+   appear and *Retake* clears it.
 4. **Measure.** Enabled once the front and at least one side view pass. It
    writes both YAML files and offers them for download.
 
@@ -138,6 +172,9 @@ After measuring, open `/review/<session id>`.
   landmark. Drag a point, or drag a slice line to change its height; releasing
   it recomputes and the table updates. A moved landmark turns magenta and is
   recorded with `auto: false`.
+- **`head_row` and `floor_row` set that view's scale.** If loose hair or a cap
+  made the body measure short, drag the head row down to the top of the skull
+  and every measurement from that view follows.
 - The table lists all 26 values. Rows marked `estimated` or `low` are
   highlighted: `bust_points` and `bum_points` are not visible in a silhouette at
   all and start from the GarmentCode ratios, so a tape measurement belongs
@@ -190,7 +227,7 @@ deletion goes through [`src/bodymeasure/store.py`](src/bodymeasure/store.py).
 
 | Table | Holds |
 |---|---|
-| `sessions` | id, subject code, sex, consent time and version, status, views, purge date |
+| `sessions` | id, subject code, sex, measured height, consent time and version, status, views, purge date |
 | `edits` | every landmark move and typed value, with the old and new value |
 | `deletions` | what was deleted, when, and why - no personal data |
 
@@ -201,12 +238,21 @@ interrupted write leaves the previous file intact.
 
 ## Known limitations
 
+- **The height is a measurement, and everything inherits its error.** The engine
+  is scale-free in the sense that it never needs a physical calibration, but it
+  is only as good as the number typed in: a centimetre off scales the whole body
+  by `1 / height`. It is also the one input a dishonest or careless operator
+  could choose freely.
+- **Hair sets the head row.** Nothing in a silhouette says where the skull ends.
+  The capture instructions say to tie it flat or wear a tight cap, and the review
+  page makes `head_row` draggable; a subject with volume left in will otherwise
+  measure short.
 - **Accuracy.** Against the GarmentCode reference bodies, bust, underbust and
-  waist land within 3 cm and height within 4 mm, but `crotch_hip_diff`,
-  `waist_line`, `arm_length` and the shoulder measurements are well out. The
-  causes are written up in [bench/README.md](bench/README.md); the short version
-  is that the maximum-curvature landmark search is not selective on a smooth
-  body, and the crotch row a silhouette shows is not the anatomical one.
+  waist land within about 3 cm, but `crotch_hip_diff`, `waist_line`,
+  `arm_length` and the shoulder measurements are well out. The causes are
+  written up in [bench/README.md](bench/README.md); the short version is that
+  the maximum-curvature landmark search is not selective on a smooth body, and
+  the crotch row a silhouette shows is not the anatomical one.
 - **No real capture has been measured.** Every test uses drawn or rendered
   figures. The pose-gate thresholds have never met a real A-pose.
 - Webcam capture works through the container, because the *browser* opens the

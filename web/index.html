@@ -10,7 +10,6 @@
   <main id="capture">
     <h1>Body measurement</h1>
     <p class="row">
-      <a href="/calibrate.html">Calibrate the station</a>
       <output id="station-status" class="hint">checking…</output>
     </p>
 
@@ -25,7 +24,11 @@
             <option value="other">other</option>
           </select>
         </label>
+        <label>Height (cm)
+          <input id="height-cm" type="number" min="100" max="220" step="0.1" placeholder="165.0" />
+        </label>
       </p>
+      <p class="hint" id="height-hint">Measured by tailor, shoes off. Do not use the client's own estimate.</p>
       <p class="row">
         <label class="consent">
           <input id="consent" type="checkbox" />
@@ -37,6 +40,7 @@
         <button id="start-session" type="button">Start session</button>
         <output id="session-out"></output>
       </p>
+      <p class="hint">Every measurement is scaled by this height, so a wrong number scales the whole body.</p>
     </section>
 
     <section>
@@ -44,9 +48,15 @@
       <p class="row">
         <button id="start-camera" type="button">Start camera</button>
         <span class="hint">
-          Stand on the floor mark, inside the guide, arms 20&ndash;45&deg; from the body.
+          Stand inside the guide, facing the camera, arms 20&ndash;45&deg; from the body.
         </span>
       </p>
+      <ul class="instructions">
+        <li>Shoes off, standing flat on the floor.</li>
+        <li>Hair tied flat, or a tight cap: loose hair sets the head row too high.</li>
+        <li>Fitted clothing, no thick layers or loose fabric.</li>
+        <li>A-pose, arms 20&ndash;45&deg; away from the body, not touching it.</li>
+      </ul>
       <canvas id="preview"></canvas>
       <video id="source" autoplay playsinline muted hidden></video>
     </section>

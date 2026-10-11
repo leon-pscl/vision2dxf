@@ -35,8 +35,10 @@ This is a demo of the method, not a product. Prefer clear, testable code over fe
   from `config/app.yaml`, so fine-tuned weights can be swapped in later without code
   changes.
 - Do **not** train, fine-tune, or download datasets. Do **not** invent
-  measurements, correction factors, or scales. Every scale comes from
-  `config/calibration.yaml`.
+  measurements, correction factors, or scales. Every scale comes from the
+  subject's **measured height** over that view's head-to-floor pixel span; the
+  optional lens calibration in `config/calibration.yaml` carries a camera model
+  and nothing else.
 - Internal unit: millimetres (float). Output unit: centimetres, 1 decimal.
 - PEP 8, type hints everywhere, `ruff check` clean, docstrings on public functions.
 - Privacy: images stay in `data/sessions/<id>/`. Each session has a consent checkbox
@@ -50,47 +52,48 @@ bodymeasure/
 ├─ AGENT_BRIEF.md
 ├─ config/
 │  ├─ app.yaml            # model paths, thresholds, camera index, rotation
-│  ├─ calibration.yaml    # written by the calibration page
+│  ├─ calibration.yaml    # OPTIONAL lens model, written by the monitor tool
 │  └─ schema.yaml         # measurement names, units, which views they need
 ├─ src/bodymeasure/
 │  ├─ api.py              # FastAPI routes
 │  ├─ session.py          # session folders, state, export
-│  ├─ calibrate.py        # checkerboard intrinsics + body-plane scale
-│  ├─ preprocess.py       # rotate, undistort
+│  ├─ preprocess.py       # rotate, undistort (skipped with no lens model)
 │  ├─ vision.py           # YOLO26 seg + pose wrappers (one load, reused)
 │  ├─ posegate.py         # accept/reject a capture, with reasons
 │  ├─ mask_clean.py       # mask clean-up
-│  ├─ landmarks.py        # rows and points from mask + keypoints
+│  ├─ landmarks.py        # rows and points from mask + keypoints, and the scale
 │  ├─ geometry.py         # widths, depths, girths, lengths, angles
 │  ├─ measure.py          # landmarks + geometry -> measurements
 │  └─ overlay.py          # debug and review images
-├─ web/                   # index.html, calibrate.html, review.html, app.js, style.css
+├─ tools/
+│  └─ calibrate_lens_on_monitor.py   # optional, separate milestone
+├─ web/                   # index.html, review.html, app.js, style.css
 ├─ tests/
 │  ├─ synthetic/          # generated silhouettes with known answers
 │  └─ test_*.py
-└─ data/                  # git-ignored: sessions/, calib/
+└─ data/                  # git-ignored: sessions/
 ```
 
 ## 4. Data contracts
 
-### config/calibration.yaml
+### config/calibration.yaml (optional)
 ```yaml
 camera_matrix: [[fx, 0, cx], [0, fy, cy], [0, 0, 1]]
 dist_coeffs: [k1, k2, p1, p2, k3]
-image_size: [width, height]        # after rotation
 rotation: 90                       # degrees clockwise applied to raw frames (webcam mounted portrait)
-mm_per_px_x: 1.04                  # horizontal scale at the body plane (floor mark)
-mm_per_px_y: 1.04                  # vertical scale at the body plane
-floor_row: 1880                    # image row of the floor line at the floor mark
-calibrated_at: 2026-10-11T10:00:00+08:00
 ```
+There is no scale here and no floor mark: the station has neither. If
+`camera_matrix` is missing, frames are measured undistorted and
+`measurement_report.yaml` carries the warning `lens distortion not corrected`.
+Written by `tools/calibrate_lens_on_monitor.py`, which shows a checkerboard on the
+monitor and asks for that screen's visible width in millimetres.
 
 ### Session folder `data/sessions/<id>/`
 ```
-subject.yaml      # id, sex (M/F/other), consent: true, notes
+subject.yaml      # id, sex (M/F/other), height_cm, consent: true, notes
 front.jpg  side_left.jpg  side_right.jpg      # raw captures (side files optional, >= 1 required)
 <view>_mask.png   <view>_kp.json              # model outputs per view
-landmarks.json    # all rows/points used, in image px, editable
+landmarks.json    # all rows/points used, in image px, editable, plus each view's scale
 body_measurements.yaml    # output for Objective 1.2 (GarmentCode format)
 measurement_report.yaml   # provenance sidecar
 debug/            # overlay PNGs for every step
@@ -137,16 +140,19 @@ subject_id: S014
 side_views_used: [left, right]
 values:
   waist:      {source: geometric, confidence: medium, edited: false, views: [front, side_left, side_right]}
+  height:     {source: tailor_input, confidence: high, edited: false, views: [front]}
   bust_points: {source: default_ratio, confidence: estimated, edited: false}
 warnings:
   - "waist depth differs 1.4 cm between left and right side views"
+  - "lens distortion not corrected"
 ```
 
 ## 5. Algorithm specification (implement exactly; ask before deviating)
 
 ### 5.1 Preprocess
-1. Rotate the raw frame by `rotation`, then `cv2.undistort` with the calibration.
-2. All later steps use the undistorted image.
+1. Rotate the raw frame by `rotation`, then `cv2.undistort` with the stored lens
+   model. With no `camera_matrix`, skip the undistortion: the report carries
+   `lens distortion not corrected` and the scale is unaffected.
 
 ### 5.2 Pose gate (`posegate.py`) - return `(ok: bool, reasons: list[str])`
 Use COCO-17 keypoints (0 nose, 1/2 eyes, 3/4 ears, 5/6 shoulders, 7/8 elbows,
@@ -155,8 +161,9 @@ Use COCO-17 keypoints (0 nose, 1/2 eyes, 3/4 ears, 5/6 shoulders, 7/8 elbows,
 - Front: each upper arm 20-45 degrees from the torso line (A-pose). Wrists must not overlap the torso mask.
 - Side: the visible side's shoulder, hip, knee and ankle confidence >= 0.5. The
   shoulder-to-shoulder horizontal distance must be < 25% of the front view's (truly side-on).
-- Every view: the whole mask lies inside the frame with >= 2% margin top and bottom.
-  The lowest mask row must be within ±15 px of `floor_row` (standing on the mark).
+- Every view: top and bottom margins each >= 8% of the frame height, the mask
+  spanning >= 70% of the frame height, and the body's horizontal centre within
+  the middle 30% of the frame width. There is no floor mark to stand on.
 - The reasons are shown to the operator verbatim, e.g. "Left arm too close to body".
 
 ### 5.3 Mask clean-up (`mask_clean.py`)
@@ -167,9 +174,16 @@ Use COCO-17 keypoints (0 nose, 1/2 eyes, 3/4 ears, 5/6 shoulders, 7/8 elbows,
 4. Fill only holes smaller than 500 px² (gaps between arm and torso or between the legs
    are larger and must remain background).
 
-### 5.4 Heights and view alignment
-- Height of image row `y` above the floor: `h_mm = (floor_row - y) * mm_per_px_y`.
-- Front and side rows are matched by `h_mm`, never by pixel row.
+### 5.4 Scale, heights and view alignment
+- Each view carries its **own** scale, from the subject's measured height:
+  `floor_row` = the lowest foreground row of that view's mask, `head_row` = the
+  highest, and `mm_per_px = height_cm * 10 / (floor_row - head_row)`.
+- Height of image row `y` above the floor, on the view that owns the row:
+  `h_mm = (floor_row - y) * mm_per_px`.
+- Front and side rows are matched by `h_mm`, never by pixel row, so the two views
+  need not be the same size in the frame.
+- `head_row` is a draggable landmark: dragging it down over hair or a cap
+  recomputes that view's scale and every measurement from that view.
 - Side facing direction: the nose keypoint x relative to the visible ear's x. Mirror
   a side image if needed so the body always faces right before landmarking.
 
@@ -179,7 +193,8 @@ in the GarmentCode repository). "Torso run" at row y means the contiguous foregr
 that contains `torso_x`, the midpoint of the two hip keypoints' x.
 
 Front view:
-- **Head top**: smallest y of the mask.
+- **Head row**: smallest y of the mask (the scale row; see 5.4).
+- **Floor row**: largest y of the mask.
 - **Neck-base row**: the row where the neck widens into the shoulders. Find the row of minimum
   mask width between the ear row and the shoulder-keypoint row, then move down to the first row
   where the width exceeds that minimum by 25%. **Neck-base side points (L/R)** are the run's
@@ -210,10 +225,13 @@ Side view (body faces right after mirroring, see 5.4):
 - **Hip row**: the row of maximum `d_b` (buttock prominence) between the waist row and the crotch row.
 - **Thigh rows**: every row from the crotch row to crotch + 10 cm.
 
-Store every landmark in `landmarks.json` as `{name, view, x, y, auto: true}`.
+Store every landmark in `landmarks.json` as `{name, view, x, y, auto: true}`,
+beside a per-view record of the `floor_row`, `head_row` and `mm_per_px` they
+imply. The rows are the single source of truth; the scale beside them is what
+those rows give.
 
 ### 5.6 Geometry (`geometry.py`) - pure functions, no I/O
-- `width_at(mask, y, x_ref) -> mm`: length of the run containing `x_ref` × `mm_per_px_x`.
+- `width_at(mask, y, x_ref, mm_per_px) -> mm`: length of the run containing `x_ref` × `mm_per_px`.
 - `split_depth_at(side_mask, h_mm, balance_x) -> (d_f, d_b)` in mm.
 - `ellipse_perimeter(a, b)`: Ramanujan II,
   `P = π(a+b)(1 + 3h / (10 + sqrt(4 - 3h)))`, `h = (a-b)² / (a+b)²`.
@@ -230,7 +248,7 @@ F = front view, S = side view. Confidence goes into `measurement_report.yaml`.
 
 | key | view | method | confidence |
 |---|---|---|---|
-| height | F | floor to head top | high |
+| height | F | the tailor's measured `height_cm`, verbatim | high |
 | head_l | S | straight distance from the nape point to the head top | medium |
 | neck_w | F | distance between the neck-base side points | medium |
 | shoulder_w | F | distance between the two shoulder points | medium |
@@ -266,25 +284,23 @@ again. Round every output to 1 decimal.
 ## 6. Web app pages and API
 
 Pages:
-1. `/calibrate`: live preview. Two steps: (a) capture 15-20 checkerboard frames and
-   compute intrinsics; (b) capture a reference board of known size held upright on the floor
-   mark and compute `mm_per_px_x/y` and `floor_row`. Show the computed numbers before saving.
-2. `/` (capture): consent checkbox, subject ID, sex. Live preview at the camera's full resolution
-   (`getUserMedia` with ideal 1920×1080), with a drawn outline guide and floor-mark
-   overlay. Buttons: Capture Front, Capture Left, Capture Right, with a 3-second countdown.
-   After each capture the server runs the pose gate. Show ✓, or the reasons with a Retake button.
-   "Measure" is enabled once front plus at least one side pass.
-3. `/review/<id>`: front and side images with mask outline, slice lines and points. Lines
-   and points are draggable. Each drag calls the recompute endpoint and updates the table. Each
-   value is editable with a note, which sets `edited: true`. Values marked `estimated` or `low`
-   are highlighted, and `bust_points` / `bum_points` show an input box. Buttons: Export YAML,
-   Delete session.
+1. `/` (capture): consent checkbox, subject ID, sex, **height in cm** with the hint
+   "Measured by tailor, shoes off. Do not use the client's own estimate." Live preview at the
+   camera's full resolution (`getUserMedia` with ideal 1920×1080), with the capture
+   instructions on screen - shoes off, hair tied flat or a tight cap, fitted clothing, A-pose -
+   and a guide box showing the gate's bounds. Buttons: Capture Front, Capture Left,
+   Capture Right, with a 3-second countdown. After each capture the server runs the pose
+   gate. Show ✓, or the reasons with a Retake button. "Measure" is enabled once front plus
+   at least one side pass.
+2. `/review/<id>`: front and side images with mask outline, slice lines and points. Lines
+   and points are draggable, including `head_row`, which sets that view's scale. Each drag
+   calls the recompute endpoint and updates the table. Each value is editable with a note,
+   which sets `edited: true`. Values marked `estimated` or `low` are highlighted, and
+   `bust_points` / `bum_points` show an input box. Buttons: Export YAML, Delete session.
 
 API (JSON in and out; images as multipart):
 ```
-POST   /api/calibration/checkerboard        frames -> intrinsics
-POST   /api/calibration/scale               frame + board size -> scale, floor_row
-POST   /api/sessions                        {subject_id, sex, consent} -> {id}
+POST   /api/sessions                        {subject_id, sex, consent, height_cm} -> {id}
 POST   /api/sessions/{id}/views/{view}      view in {front, side_left, side_right}; image -> gate result
 POST   /api/sessions/{id}/measure           -> landmarks + measurements
 PUT    /api/sessions/{id}/landmarks         edited landmarks -> recomputed measurements
@@ -307,8 +323,10 @@ mm/px. Tests: `ellipse_perimeter(a, a) == 2πa` to 1e-9; it matches numerical
 integration within 0.01% for b/a in [0.3, 1]; `width_at` and `depth_at` recover the drawn
 sizes within 1 px; `split_depth_at` recovers asymmetric front/back depths within 1 px.
 
-**M2 - Calibration page.** Checkerboard intrinsics + body-plane scale, written to
-calibration.yaml. Test with saved sample frames in `tests/data/`.
+**M2 - Optional lens calibration (separate milestone).** `tools/calibrate_lens_on_monitor.py`:
+draw a checkerboard on the station monitor, ask for the screen's visible width in mm, fit
+`camera_matrix` / `dist_coeffs` with `cv2.calibrateCamera`. There is no scale step and no
+calibration page.
 
 **M3 - Vision + pose gate + clean-up.** YOLO26 wrappers (models loaded once at startup),
 `posegate.py`, `mask_clean.py`, debug overlays. Report CPU time per image.
@@ -335,10 +353,14 @@ every exported file without error.
 - Front plus one side, and front plus both sides, both produce body_measurements.yaml
   (26 keys, loadable by pygarment) and measurement_report.yaml.
 - Every measurement in the table has a debug overlay showing where it was taken.
-- Dragging a landmark changes only the measurements that depend on it.
+- Dragging a landmark changes only the measurements that depend on it; dragging
+  `head_row` rescales that view.
+- A synthetic figure redrawn at any size and offset measures the same when
+  `height_cm` matches what was drawn, and a +1 cm height error moves the waist by
+  about `waist / height`.
 - `scripts/check.sh` passes (ruff + pytest).
-- README: setup, calibration procedure, capture procedure (tight clothing, A-pose,
-  standing on the mark), and known limitations.
+- README: setup, how the scale works, capture procedure (shoes off, hair tied
+  flat, fitted clothing, A-pose), and known limitations.
 
 ## 9. When unsure
 
@@ -374,6 +396,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   id              TEXT PRIMARY KEY,           -- UUID4 hex = folder name
   subject_code    TEXT NOT NULL,              -- tailor's client code, not a full name
   sex             TEXT CHECK (sex IN ('M','F','other')),
+  height_cm       REAL NOT NULL,                 -- the measured height every view is scaled by
   consent_at      TEXT NOT NULL,              -- ISO 8601, Asia/Manila
   consent_version TEXT NOT NULL,              -- version of the consent form text shown
   created_at      TEXT NOT NULL,
@@ -404,7 +427,7 @@ CREATE TABLE IF NOT EXISTS deletions (        -- no personal data, by design
 );
 
 ### 10.4 store.py functions (type-hinted, each with a pytest test)
-create_session(subject_code, sex, consent_version) -> str
+create_session(subject_code, sex, consent_version, height_cm) -> str
 add_view(session_id, view) -> None
 set_status(session_id, status) -> None
 log_edit(session_id, kind, target, old, new, note) -> None

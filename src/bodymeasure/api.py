@@ -13,17 +13,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from bodymeasure import __version__, store
-from bodymeasure.calibrate import (
-    compute_intrinsics,
-    compute_plane_scale,
-    load_intrinsics,
-    save_calibration,
-    save_intrinsics,
-)
 from bodymeasure.config import ROOT, load_app_config, load_calibration, load_schema
 from bodymeasure.landmarks import Landmark, load_landmarks
 from bodymeasure.measure import MeasurementSet
-from bodymeasure.preprocess import decode_image, rotate
+from bodymeasure.preprocess import decode_image
 from bodymeasure.session import (
     Subject,
     captured_views,
@@ -104,76 +97,18 @@ def _yaml_file(session_id: str, name: str) -> FileResponse:
 
 @app.get("/api/health")
 def health() -> dict[str, object]:
-    """Report version, whether the station is calibrated, and the measurement keys."""
+    """Report version, whether the lens is calibrated, and the measurement keys."""
     config = load_app_config()
     calibration = load_calibration()
     return {
         "status": "ok",
         "version": __version__,
-        "calibrated": calibration is not None,
+        "calibrated": calibration is not None and calibration.has_lens_model,
         "weights": weights_available(),
-        "calibration": None
-        if calibration is None
-        else {
-            "floor_row": calibration.floor_row,
-            "image_size": calibration.image_size,
-            "rotation": calibration.rotation,
-            "mm_per_px_y": calibration.mm_per_px_y,
-        },
         "camera_rotation": config.camera.rotation,
         "consent_version": config.storage.consent_version,
         "measurement_keys": sorted(load_schema()),
     }
-
-
-@app.post("/api/calibration/checkerboard")
-async def calibration_checkerboard(
-    frames: Annotated[list[UploadFile], File()],
-    pattern_cols: Annotated[int, Form()],
-    pattern_rows: Annotated[int, Form()],
-    square_mm: Annotated[float, Form()],
-) -> dict[str, object]:
-    """Compute and park the camera intrinsics from several checkerboard views."""
-    rotation = load_app_config().camera.rotation
-    try:
-        images = [rotate(decode_image(await frame.read()), rotation) for frame in frames]
-        intrinsics = compute_intrinsics(images, (pattern_cols, pattern_rows), square_mm)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    save_intrinsics(intrinsics)
-    return asdict(intrinsics)
-
-
-@app.post("/api/calibration/scale")
-async def calibration_scale(
-    frame: Annotated[UploadFile, File()],
-    pattern_cols: Annotated[int, Form()],
-    pattern_rows: Annotated[int, Form()],
-    square_mm: Annotated[float, Form()],
-    bottom_margin_mm: Annotated[float, Form()] = 0.0,
-    save: Annotated[bool, Form()] = False,
-) -> dict[str, object]:
-    """Measure the body-plane scale, and with ``save`` write the station calibration.
-
-    Called twice by the page: once to show the numbers, once to commit them.
-    """
-    rotation = load_app_config().camera.rotation
-    intrinsics = load_intrinsics()
-    try:
-        image = rotate(decode_image(await frame.read()), rotation)
-        scale = compute_plane_scale(
-            image, (pattern_cols, pattern_rows), square_mm, intrinsics, bottom_margin_mm
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    result: dict[str, object] = {**asdict(scale), "saved": False}
-    if save:
-        if intrinsics is None:
-            raise HTTPException(status_code=409, detail="run the checkerboard step first")
-        save_calibration(intrinsics, scale, rotation)
-        result["saved"] = True
-    return result
 
 
 @app.post("/api/sessions", status_code=201)
@@ -181,12 +116,19 @@ async def create_session_route(
     subject_code: Annotated[str, Form()],
     sex: Annotated[str, Form()],
     consent: Annotated[bool, Form()],
+    height_cm: Annotated[float, Form()],
     notes: Annotated[str, Form()] = "",
 ) -> dict[str, str]:
     """Open a session. Consent must be ticked before any capture."""
     try:
         session_id = create_session(
-            Subject(code=subject_code, sex=sex, consent=consent, notes=notes)
+            Subject(
+                code=subject_code,
+                sex=sex,
+                consent=consent,
+                height_cm=height_cm,
+                notes=notes,
+            )
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -4,11 +4,16 @@ Definitions follow the GarmentCode measurement sheet. A "torso run" at row ``y``
 is the contiguous foreground run containing ``torso_x``, the midpoint of the two
 hip keypoints. Rows are stored as landmarks too, with ``x`` on the body centre,
 so the review UI can drag a row like any other point.
+
+Each view carries its own :class:`ViewScale`: the subject's measured height
+divided by the pixels from the top of the head to the floor turns pixels into
+millimetres, with no physical calibration on the station.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -49,21 +54,98 @@ class Landmark:
     auto: bool = True
 
 
+@dataclass(frozen=True)
+class ViewScale:
+    """How many millimetres one pixel is on one view, from the subject's height.
+
+    ``floor_row`` and ``head_row`` are landmarks, so the tailor can drag the head
+    row down over hair or a cap and every measurement from that view follows.
+    """
+
+    floor_row: int
+    head_row: int
+    mm_per_px: float
+
+    def height_mm(self, row: float) -> float:
+        """Return the height above the floor, in mm, of image row ``row``."""
+        return (self.floor_row - row) * self.mm_per_px
+
+    def row_of(self, h_mm: float) -> int:
+        """Return the image row standing ``h_mm`` above the floor."""
+        return int(round(self.floor_row - h_mm / self.mm_per_px))
+
+
+def view_scale(landmarks: list[Landmark], height_cm: float) -> ViewScale:
+    """Return one view's scale from its floor and head rows and the entered height.
+
+    Raises:
+        ValueError: if the scale landmarks are missing, or the body has no
+            height in pixels at all.
+
+    """
+    rows = as_dict(landmarks)
+    missing = {"floor_row", "head_row"} - set(rows)
+    if missing:
+        raise ValueError(f"missing scale landmarks: {', '.join(sorted(missing))}")
+    floor, head = rows["floor_row"].y, rows["head_row"].y
+    span = floor - head
+    if span <= 0:
+        raise ValueError("the floor row must be below the head row: check the mask")
+    return ViewScale(int(floor), int(head), height_cm * 10.0 / span)
+
+
 def as_dict(landmarks: list[Landmark]) -> dict[str, Landmark]:
     """Index landmarks by name."""
     return {landmark.name: landmark for landmark in landmarks}
 
 
-def save_landmarks(landmarks: list[Landmark], path: Path) -> Path:
-    """Write ``landmarks.json``. Returns the path written."""
+def scale_landmarks(mask: np.ndarray, view: str, centre_x: float) -> list[Landmark]:
+    """Return the floor and head rows that set this view's scale.
+
+    The floor row is the lowest foreground row and the head row the highest, so
+    the span between them is the subject as seen in this view, shoes included.
+
+    Raises:
+        ValueError: if the mask is empty.
+
+    """
+    rows = np.flatnonzero(np.asarray(mask).any(axis=1))
+    if rows.size == 0:
+        raise ValueError("empty mask: nothing to measure")
+    return [
+        Landmark("floor_row", view, centre_x, float(rows.max())),
+        Landmark("head_row", view, centre_x, float(rows.min())),
+    ]
+
+
+def save_landmarks(landmarks: list[Landmark], path: Path, height_cm: float) -> Path:
+    """Write ``landmarks.json``: the points plus each view's resulting scale.
+
+    The points are the single source of truth; the scale beside them is what they
+    imply, recomputed here so the two cannot drift apart. Returns the path.
+    """
+    views = {}
+    for view in dict.fromkeys(mark.view for mark in landmarks):
+        scale = view_scale([mark for mark in landmarks if mark.view == view], height_cm)
+        views[view] = {
+            "floor_row": scale.floor_row,
+            "head_row": scale.head_row,
+            "mm_per_px": round(scale.mm_per_px, 6),
+        }
+    payload = {
+        "views": views,
+        "landmarks": [asdict(mark) for mark in landmarks],
+    }
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps([asdict(mark) for mark in landmarks], indent=2), encoding="utf-8")
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return path
 
 
 def load_landmarks(path: Path) -> list[Landmark]:
     """Read ``landmarks.json``, including any edits the tailor made."""
-    return [Landmark(**entry) for entry in json.loads(path.read_text(encoding="utf-8"))]
+    return [
+        Landmark(**entry) for entry in json.loads(path.read_text(encoding="utf-8"))["landmarks"]
+    ]
 
 
 def _contour(mask: np.ndarray) -> np.ndarray:
@@ -102,19 +184,6 @@ def _sharpest(
         return None
     angles = np.where(keep, turning_angles(contour, span), -1.0)
     return contour[int(np.argmax(angles))]
-
-
-def head_top_row(mask: np.ndarray) -> int:
-    """Return the smallest row holding any foreground.
-
-    Raises:
-        ValueError: if the mask is empty.
-
-    """
-    rows = np.flatnonzero(np.asarray(mask).any(axis=1))
-    if rows.size == 0:
-        raise ValueError("empty mask: nothing to landmark")
-    return int(rows.min())
 
 
 def neck_base_row(mask: np.ndarray, ear_row: int, shoulder_row: int, torso_x: int) -> int:
@@ -239,7 +308,7 @@ def narrowest_cross_section(
 
 
 def find_front_landmarks(
-    mask: np.ndarray, keypoints: np.ndarray, mm_per_px_x: float
+    mask: np.ndarray, keypoints: np.ndarray, height_cm: float
 ) -> list[Landmark]:
     """Find every front-view landmark of brief 5.5.
 
@@ -252,8 +321,7 @@ def find_front_landmarks(
     hip_row = int(round((keypoints[L_HIP, 1] + keypoints[R_HIP, 1]) / 2))
     ear_row = int(round((keypoints[L_EAR, 1] + keypoints[R_EAR, 1]) / 2))
 
-    head_top = head_top_row(mask)
-    head_run = run_containing(mask, head_top, torso_x) or (torso_x, torso_x)
+    scale = scale_landmarks(mask, "front", torso_x)
     neck_row = neck_base_row(mask, ear_row, shoulder_row, torso_x)
     neck_run = run_containing(mask, neck_row, torso_x)
     if neck_run is None:
@@ -273,7 +341,7 @@ def find_front_landmarks(
     }
 
     marks = [
-        Landmark("head_top", "front", (head_run[0] + head_run[1]) / 2, head_top),
+        *scale,
         Landmark("neck_base_left", "front", neck_x["left"], neck_row),
         Landmark("neck_base_right", "front", neck_x["right"], neck_row),
         Landmark("armpit_row", "front", torso_x, armpit),
@@ -293,7 +361,7 @@ def find_front_landmarks(
             raise ValueError(f"could not find the {side} shoulder point")
         marks.append(Landmark(f"shoulder_{side}", "front", float(point[0]), float(point[1])))
 
-    search_px = WRIST_SEARCH_MM / mm_per_px_x
+    search_px = WRIST_SEARCH_MM / view_scale(scale, height_cm).mm_per_px
     for name, elbow_index, wrist_index in (
         ("wrist_left", L_ELBOW, L_WRIST),
         ("wrist_right", R_ELBOW, R_WRIST),
@@ -319,12 +387,14 @@ def find_side_landmarks(
     mask: np.ndarray,
     keypoints: np.ndarray,
     view: str,
-    front_rows: dict[str, int],
+    front_heights: Mapping[str, float],
+    height_cm: float,
 ) -> list[Landmark]:
     """Find every side-view landmark of brief 5.5.
 
-    ``front_rows`` carries the armpit, waist and crotch rows found on the front
-    view; both views share one calibration, so a row is the same height in each.
+    ``front_heights`` carries the armpit, waist and crotch heights in mm found on
+    the front view. Heights, not rows, because each view has its own scale: the
+    same height lands on a different row in a differently sized frame.
 
     Raises:
         ValueError: if the silhouette does not show a landmark the engine needs.
@@ -344,7 +414,14 @@ def find_side_landmarks(
     bottom = Landmark(
         "balance_bottom", view, float(keypoints[hip_index, 0]), float(keypoints[hip_index, 1])
     )
-    marks = [top, bottom]
+    floor, head = scale_landmarks(mask, view, 0.0)
+    scale = view_scale([floor, head], height_cm)
+    marks = [
+        top,
+        bottom,
+        Landmark("floor_row", view, balance_x_at(floor.y, top, bottom), floor.y),
+        Landmark("head_row", view, balance_x_at(head.y, top, bottom), head.y),
+    ]
 
     def depths(row: int) -> tuple[float, float]:
         """Return the (front, back) depth in pixels at ``row``."""
@@ -354,16 +431,15 @@ def find_side_landmarks(
             return 0.0, 0.0
         return float(run[1] - centre + 1), float(centre - run[0])
 
-    armpit, waist, crotch = front_rows["armpit"], front_rows["waist"], front_rows["crotch"]
+    armpit = scale.row_of(front_heights["armpit"])
+    waist = scale.row_of(front_heights["waist"])
+    crotch = scale.row_of(front_heights["crotch"])
     bust = max(range(armpit, waist + 1), key=lambda row: depths(row)[0])
     underbust = min(range(bust, waist + 1), key=lambda row: depths(row)[0])
     hip = max(range(waist, crotch + 1), key=lambda row: depths(row)[1])
 
     for name, row in (("bust_row", bust), ("underbust_row", underbust), ("hip_row", hip)):
         marks.append(Landmark(name, view, balance_x_at(row, top, bottom), row))
-
-    head_top = head_top_row(mask)
-    marks.append(Landmark("side_head_top", view, balance_x_at(head_top, top, bottom), head_top))
 
     contour = _contour(mask)
     ear_row = float(keypoints[ear_index, 1])

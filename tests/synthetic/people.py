@@ -13,20 +13,30 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-SHAPE = (1800, 900)  # rows, columns
-FLOOR_ROW = 1750
+FRAME_MARGIN = 0.09  # the pose gate wants 8% of the frame clear top and bottom
+_DRAWN_FLOOR = 1750  # rows below, in the drawing as originally laid out
+_DRAWN_HEAD_TOP = 105
+FRAME_HEIGHT = round((_DRAWN_FLOOR - _DRAWN_HEAD_TOP + 1) / (1 - 2 * FRAME_MARGIN))
+FRAME_PAD = round(FRAME_MARGIN * FRAME_HEIGHT) - _DRAWN_HEAD_TOP
+
+# Every row below is a row in the finished frame, not in the drawing: the figure is
+# framed with FRAME_MARGIN clear above and below, so a good capture really does
+# pass the gate rather than failing it for want of room.
+SHAPE = (FRAME_HEIGHT, 900)  # rows, columns
+FLOOR_ROW = _DRAWN_FLOOR + FRAME_PAD
 CENTRE_X = 450
 
-HEAD_CENTRE = (CENTRE_X, 220)
+HEAD_CENTRE = (CENTRE_X, 220 + FRAME_PAD)
 HEAD_AXES = (80, 115)
-SHOULDER_Y = 380
+SHOULDER_Y = 380 + FRAME_PAD
 SHOULDER_DX = 95
-WAIST_Y = 760
+WAIST_Y = 760 + FRAME_PAD
 WAIST_DX = 62
-HIP_Y = 880
+HIP_Y = 880 + FRAME_PAD
 HIP_DX = 78
-KNEE_Y = 1320
-ANKLE_Y = 1700
+KNEE_Y = 1320 + FRAME_PAD
+ANKLE_Y = 1700 + FRAME_PAD
+CROTCH_Y = 1000 + FRAME_PAD  # the legs meet until here, so the crotch is below the hip
 LEG_DX = 85
 ARM_UPPER_MM = 250.0
 ARM_LOWER_MM = 230.0
@@ -34,7 +44,7 @@ ARM_THICKNESS = 55
 HAND_MM = 90.0  # the hand continues past the wrist, so the wrist is a real narrowing
 NECK_TOP_DX = 45
 NECK_BOTTOM_DX = 75
-NECK_TOP_Y = 295
+NECK_TOP_Y = 295 + FRAME_PAD
 LEG_GAP = 18
 
 
@@ -139,14 +149,21 @@ def make_person(
         cv2.circle(mask, tuple(chain[-1]), ARM_THICKNESS // 2, 1, -1)
 
     for sign in (-1, 1):
-        inner = CENTRE_X + sign * LEG_GAP
-        outer = CENTRE_X + sign * (LEG_DX + 40)
+        # The leg starts exactly as wide as the hip and widens towards the knee, so
+        # the silhouette has no step at the hip row and the hip width is stable.
+        outer = CENTRE_X + sign * HIP_DX
+        # The inner edges meet at the centre down to CROTCH_Y and step apart there,
+        # rather than parting gradually: a gap that opens by a fraction of a pixel
+        # per row would put the crotch wherever rounding lands. make_side draws the
+        # same body, so the crotch row found here is the one needed there.
         leg = np.array(
             [
-                [inner, HIP_Y - 1],
+                [CENTRE_X, HIP_Y - 1],
                 [outer, HIP_Y - 1],
                 [CENTRE_X + sign * (LEG_DX + 25), FLOOR_ROW],
                 [CENTRE_X + sign * LEG_GAP, FLOOR_ROW],
+                [CENTRE_X + sign * LEG_GAP, CROTCH_Y + 1],
+                [CENTRE_X, CROTCH_Y],
             ],
             dtype=np.int32,
         )
@@ -159,7 +176,7 @@ def make_person(
     return SyntheticPerson(
         mask=mask.astype(bool),
         keypoints=points,
-        floor_row=FLOOR_ROW,
+        floor_row=FLOOR_ROW + floor_offset_px,
         torso_x=CENTRE_X,
         shoulder_span_px=2.0 * SHOULDER_DX,
         rows={
@@ -173,8 +190,10 @@ def make_person(
 
 
 # Side profile: (row, back offset, front offset) from the balance line, in px.
-# The maxima and minima are the answers the landmark search must find.
-SIDE_PROFILE = (
+# The maxima and minima are the answers the landmark search must find. Rows are in
+# frame coordinates like every other row here, so the profile lines up with the
+# front view's armpit, waist and crotch.
+_DRAWN_SIDE_PROFILE = (
     (105, 55, 70),     # head top
     (200, 85, 95),     # head
     (300, 45, 55),     # neck
@@ -186,10 +205,12 @@ SIDE_PROFILE = (
     (1000, 110, 95),   # crotch
     (1320, 70, 75),    # knee
     (1700, 60, 120),   # ankle and foot
-    (FLOOR_ROW, 60, 130),
+    (1750, 60, 130),   # floor
 )
+SIDE_PROFILE = tuple((row + FRAME_PAD, back, front) for row, back, front in _DRAWN_SIDE_PROFILE)
 SIDE_BALANCE_X = 450
-SIDE_ROWS = {"bust": 520, "underbust": 600, "waist": 760, "hip": 880, "crotch": 1000}
+_DRAWN_SIDE_ROWS = {"bust": 520, "underbust": 600, "waist": 760, "hip": 880, "crotch": 1000}
+SIDE_ROWS = {name: row + FRAME_PAD for name, row in _DRAWN_SIDE_ROWS.items()}
 
 
 @dataclass(frozen=True)
@@ -202,6 +223,67 @@ class SyntheticSide:
     balance_x: int
     rows: dict[str, int]
     depths: dict[str, tuple[float, float]]
+
+
+@dataclass(frozen=True)
+class RescaledFigure:
+    """A synthetic figure redrawn at another size, with the height it implies.
+
+    The engine's scale is the subject's height over the head-to-floor pixel span,
+    so a figure drawn at any size measures the same as long as the reported
+    ``height_cm`` matches what was drawn.
+    """
+
+    mask: np.ndarray
+    keypoints: np.ndarray
+    mm_per_px: float
+
+    @property
+    def height_cm(self) -> float:
+        """Return the height the drawn figure implies, to the 0.1 cm the app takes."""
+        rows = np.flatnonzero(self.mask.any(axis=1))
+        return round(float(rows.max() - rows.min()) * self.mm_per_px / 10.0, 1)
+
+
+def rescale(
+    mask: np.ndarray,
+    keypoints: np.ndarray,
+    factor: float,
+    offset_px: tuple[int, int] = (0, 0),
+) -> RescaledFigure:
+    """Return a figure redrawn ``factor`` times larger in pixels, then shifted.
+
+    ``offset_px`` is ``(columns, rows)``, the image x/y order. Area averaging
+    keeps the drawn widths honest at a fraction of a pixel, which is what a
+    different camera distance actually does to a silhouette.
+    """
+    height = max(1, int(round(mask.shape[0] * factor)))
+    width = max(1, int(round(mask.shape[1] * factor)))
+    drawn = (cv2.resize(mask.astype(np.float32), (width, height), interpolation=cv2.INTER_AREA)
+             > 0.5)
+    # The figure lands exactly on the offset and the canvas grows to hold it, so a
+    # negative offset shifts the body up rather than being dropped. The origin is
+    # subtracted because mask and keypoints both index the canvas, not the frame.
+    column, row = offset_px
+    origin_row, origin_column = min(0, row), min(0, column)
+    shift_row, shift_column = row - origin_row, column - origin_column
+    canvas = np.zeros(
+        (
+            max(mask.shape[0], row + height) - origin_row,
+            max(mask.shape[1], column + width) - origin_column,
+        ),
+        dtype=bool,
+    )
+    canvas[
+        shift_row : shift_row + height,
+        shift_column : shift_column + width,
+    ] = drawn
+    points = keypoints.copy()
+    # cv2.resize maps pixel centres, so a source pixel lands at
+    # (pixel + 0.5) * factor - 0.5 in the destination.
+    points[:, 0] = (points[:, 0] + 0.5) * factor - 0.5 + shift_column
+    points[:, 1] = (points[:, 1] + 0.5) * factor - 0.5 + shift_row
+    return RescaledFigure(mask=canvas, keypoints=points, mm_per_px=1.0 / factor)
 
 
 def _side_edges() -> tuple[np.ndarray, np.ndarray]:

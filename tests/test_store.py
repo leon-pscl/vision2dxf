@@ -18,8 +18,32 @@ def database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def _session(code: str = "S014") -> str:
-    return store.create_session(code, "F", consent_version="2026-10-11")
+def _session(code: str = "S014", height_cm: float = 164.5) -> str:
+    return store.create_session(code, "F", "2026-10-11", height_cm)
+
+
+def test_the_measured_height_is_stored_with_the_session() -> None:
+    session_id = _session(height_cm=171.4)
+    assert store.get_session(session_id)["height_cm"] == pytest.approx(171.4)
+
+
+def test_a_database_from_before_height_scaling_still_opens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``CREATE TABLE IF NOT EXISTS`` leaves an old table alone; the column is added."""
+    legacy = tmp_path / "legacy"  # the autouse fixture already made the current one
+    monkeypatch.setattr(store, "data_dir", lambda: legacy)
+    monkeypatch.setattr(store, "sessions_root", lambda: legacy / "sessions")
+    with store.connect() as connection:
+        connection.execute(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, subject_code TEXT NOT NULL,"
+            " sex TEXT, consent_at TEXT NOT NULL, consent_version TEXT NOT NULL,"
+            " created_at TEXT NOT NULL, status TEXT NOT NULL, views TEXT NOT NULL DEFAULT '[]',"
+            " confirmed_at TEXT, images_purge_after TEXT)"
+        )
+
+    store.initialise()
+    assert store.get_session(_session(height_cm=160.0))["height_cm"] == pytest.approx(160.0)
 
 
 def _populate(session_id: str, body: dict[str, float] | None = None) -> Path:

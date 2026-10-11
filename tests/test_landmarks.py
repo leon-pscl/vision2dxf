@@ -1,5 +1,6 @@
 """Landmark search on synthetic figures whose rows are known by construction."""
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -22,14 +23,19 @@ from bodymeasure.landmarks import (
     crotch_row,
     find_front_landmarks,
     find_side_landmarks,
-    head_top_row,
     load_landmarks,
     narrowest_cross_section,
     neck_base_row,
     save_landmarks,
+    scale_landmarks,
     turning_angles,
+    view_scale,
     waist_row,
 )
+
+HEIGHT_CM = 164.5  # the drawn figure spans 1645 rows at 1 mm/px
+# Front heights in mm: floor row 1750 less the row each landmark lands on.
+HEIGHTS = {"armpit": 1750.0 - 430, "waist": 1750.0 - 760, "crotch": 1750.0 - 1000}
 
 
 @pytest.fixture
@@ -37,13 +43,17 @@ def front() -> object:
     return make_person()
 
 
-def test_head_top_is_the_highest_foreground_row(front: object) -> None:
-    assert head_top_row(front.mask) == int(np.flatnonzero(front.mask.any(axis=1)).min())
+def test_the_scale_rows_are_the_extremes_of_the_mask(front: object) -> None:
+    marks = as_dict(scale_landmarks(front.mask, "front", 450.0))
+    rows = np.flatnonzero(front.mask.any(axis=1))
+
+    assert marks["floor_row"].y == rows.max()
+    assert marks["head_row"].y == rows.min()
 
 
-def test_head_top_rejects_an_empty_mask() -> None:
+def test_the_scale_rows_reject_an_empty_mask() -> None:
     with pytest.raises(ValueError, match="empty mask"):
-        head_top_row(np.zeros((10, 10), dtype=bool))
+        scale_landmarks(np.zeros((10, 10), dtype=bool), "front", 5.0)
 
 
 def test_turning_angles_are_zero_on_a_straight_line() -> None:
@@ -112,9 +122,10 @@ def test_the_narrowest_cross_section_measures_across_the_arm(front: object) -> N
 
 
 def test_every_front_landmark_is_found(front: object) -> None:
-    marks = as_dict(find_front_landmarks(front.mask, front.keypoints, mm_per_px_x=1.0))
+    marks = as_dict(find_front_landmarks(front.mask, front.keypoints, HEIGHT_CM))
     expected = {
-        "head_top",
+        "floor_row",
+        "head_row",
         "neck_base_left",
         "neck_base_right",
         "armpit_row",
@@ -132,8 +143,50 @@ def test_every_front_landmark_is_found(front: object) -> None:
     assert marks["neck_base_left"].x < front.torso_x < marks["neck_base_right"].x
     assert marks["shoulder_left"].x < marks["neck_base_left"].x
     assert marks["shoulder_right"].x > marks["neck_base_right"].x
-    assert marks["head_top"].y < marks["armpit_row"].y < marks["waist_row"].y
+    assert marks["head_row"].y < marks["armpit_row"].y < marks["waist_row"].y
     assert marks["waist_row"].y < marks["crotch_row"].y
+
+
+def test_the_scale_comes_from_the_height_over_the_head_to_floor_span(front: object) -> None:
+    """No station calibration: mm/px is the entered height over the drawn span."""
+    marks = as_dict(find_front_landmarks(front.mask, front.keypoints, HEIGHT_CM))
+    scale = view_scale(list(marks.values()), HEIGHT_CM)
+
+    assert scale.floor_row == marks["floor_row"].y
+    assert scale.head_row == marks["head_row"].y
+    assert scale.mm_per_px == pytest.approx(HEIGHT_CM * 10 / (scale.floor_row - scale.head_row))
+    assert scale.height_mm(scale.head_row) == pytest.approx(HEIGHT_CM * 10)
+
+
+def test_dragging_the_head_row_shortens_the_span_and_stretches_the_scale(front: object) -> None:
+    """The tailor pulls head_row down over hair; every measurement follows."""
+    from dataclasses import replace
+
+    marks = find_front_landmarks(front.mask, front.keypoints, HEIGHT_CM)
+    before = view_scale(marks, HEIGHT_CM)
+    lowered = [
+        replace(mark, y=mark.y + 20, auto=False) if mark.name == "head_row" else mark
+        for mark in marks
+    ]
+
+    after = view_scale(lowered, HEIGHT_CM)
+
+    assert after.head_row == before.head_row + 20
+    assert after.mm_per_px > before.mm_per_px, "the same height now spans fewer pixels"
+
+
+def test_a_scale_without_its_rows_is_reported(front: object) -> None:
+    with pytest.raises(ValueError, match="missing scale landmarks"):
+        view_scale([Landmark("waist_row", "front", 450.0, 760.0)], HEIGHT_CM)
+
+
+def test_an_inverted_scale_is_refused() -> None:
+    marks = [
+        Landmark("floor_row", "front", 0.0, 100.0),
+        Landmark("head_row", "front", 0.0, 100.0),
+    ]
+    with pytest.raises(ValueError, match="below the head row"):
+        view_scale(marks, HEIGHT_CM)
 
 
 def test_balance_line_interpolates_and_extrapolates() -> None:
@@ -147,8 +200,7 @@ def test_balance_line_interpolates_and_extrapolates() -> None:
 
 def test_side_landmarks_find_the_drawn_rows() -> None:
     side = make_side()
-    front_rows = {"armpit": 430, "waist": side.rows["waist"], "crotch": side.rows["crotch"]}
-    marks = as_dict(find_side_landmarks(side.mask, side.keypoints, "side_left", front_rows))
+    marks = as_dict(find_side_landmarks(side.mask, side.keypoints, "side_left", HEIGHTS, HEIGHT_CM))
 
     assert marks["bust_row"].y == pytest.approx(side.rows["bust"], abs=12)
     assert marks["underbust_row"].y == pytest.approx(side.rows["underbust"], abs=20)
@@ -158,8 +210,7 @@ def test_side_landmarks_find_the_drawn_rows() -> None:
 
 def test_the_nape_sits_behind_the_balance_line_above_the_shoulder() -> None:
     side = make_side()
-    front_rows = {"armpit": 430, "waist": side.rows["waist"], "crotch": side.rows["crotch"]}
-    marks = as_dict(find_side_landmarks(side.mask, side.keypoints, "side_left", front_rows))
+    marks = as_dict(find_side_landmarks(side.mask, side.keypoints, "side_left", HEIGHTS, HEIGHT_CM))
 
     assert marks["nape"].x < side.balance_x
     assert 215 <= marks["nape"].y <= SHOULDER_Y
@@ -167,33 +218,57 @@ def test_the_nape_sits_behind_the_balance_line_above_the_shoulder() -> None:
 
 def test_the_hps_is_above_the_shoulder_keypoint() -> None:
     side = make_side()
-    front_rows = {"armpit": 430, "waist": side.rows["waist"], "crotch": side.rows["crotch"]}
-    marks = as_dict(find_side_landmarks(side.mask, side.keypoints, "side_left", front_rows))
+    marks = as_dict(find_side_landmarks(side.mask, side.keypoints, "side_left", HEIGHTS, HEIGHT_CM))
 
     assert marks["hps"].y < SHOULDER_Y
-    assert marks["side_head_top"].y < marks["hps"].y
+    assert marks["head_row"].y < marks["hps"].y
+
+
+def test_the_side_scale_is_the_sides_own_span() -> None:
+    """Front and side are matched by height, so each view carries its own scale."""
+    side = make_side()
+    marks = as_dict(find_side_landmarks(side.mask, side.keypoints, "side_left", HEIGHTS, HEIGHT_CM))
+    scale = view_scale(list(marks.values()), HEIGHT_CM)
+    rows = np.flatnonzero(side.mask.any(axis=1))
+
+    assert scale.floor_row == rows.max()
+    assert scale.head_row == rows.min()
+    assert scale.mm_per_px == pytest.approx(HEIGHT_CM * 10 / (rows.max() - rows.min()))
 
 
 def test_landmarks_round_trip_through_json(tmp_path: Path) -> None:
     front = make_person()
-    marks = find_front_landmarks(front.mask, front.keypoints, mm_per_px_x=1.0)
-    path = save_landmarks(marks, tmp_path / "session" / "landmarks.json")
+    marks = find_front_landmarks(front.mask, front.keypoints, HEIGHT_CM)
+    path = save_landmarks(marks, tmp_path / "session" / "landmarks.json", HEIGHT_CM)
 
     reloaded = load_landmarks(path)
     assert reloaded == marks
     assert path.name == "landmarks.json"
 
 
+def test_the_stored_scale_matches_the_stored_rows(tmp_path: Path) -> None:
+    front = make_person()
+    marks = find_front_landmarks(front.mask, front.keypoints, HEIGHT_CM)
+    path = save_landmarks(marks, tmp_path / "landmarks.json", HEIGHT_CM)
+
+    stored = json.loads(path.read_text(encoding="utf-8"))["views"]["front"]
+    assert stored == {
+        "floor_row": view_scale(marks, HEIGHT_CM).floor_row,
+        "head_row": view_scale(marks, HEIGHT_CM).head_row,
+        "mm_per_px": pytest.approx(view_scale(marks, HEIGHT_CM).mm_per_px),
+    }
+
+
 def test_an_edited_landmark_survives_the_round_trip(tmp_path: Path) -> None:
     front = make_person()
-    marks = find_front_landmarks(front.mask, front.keypoints, mm_per_px_x=1.0)
+    marks = find_front_landmarks(front.mask, front.keypoints, HEIGHT_CM)
     moved = [
         Landmark(mark.name, mark.view, mark.x, mark.y + 12, auto=False)
         if mark.name == "waist_row"
         else mark
         for mark in marks
     ]
-    path = save_landmarks(moved, tmp_path / "landmarks.json")
+    path = save_landmarks(moved, tmp_path / "landmarks.json", HEIGHT_CM)
 
     waist = as_dict(load_landmarks(path))["waist_row"]
     assert waist.auto is False
@@ -208,7 +283,7 @@ def test_shoulder_landmarks_follow_the_subject_not_the_image(front: object) -> N
     """
     from bodymeasure.posegate import L_SHOULDER, R_SHOULDER
 
-    marks = as_dict(find_front_landmarks(front.mask, front.keypoints, mm_per_px_x=1.0))
+    marks = as_dict(find_front_landmarks(front.mask, front.keypoints, HEIGHT_CM))
     for side, index in (("left", L_SHOULDER), ("right", R_SHOULDER)):
         keypoint_side = front.keypoints[index, 0] - front.torso_x
         assert (marks[f"shoulder_{side}"].x - front.torso_x) * keypoint_side > 0, side
@@ -217,7 +292,7 @@ def test_shoulder_landmarks_follow_the_subject_not_the_image(front: object) -> N
 
 def test_the_shoulder_point_is_lateral_to_the_neck(front: object) -> None:
     """The neck-shoulder junction is a sharp corner and must not win the search."""
-    marks = as_dict(find_front_landmarks(front.mask, front.keypoints, mm_per_px_x=1.0))
+    marks = as_dict(find_front_landmarks(front.mask, front.keypoints, HEIGHT_CM))
     for side in ("left", "right"):
         neck = abs(marks[f"neck_base_{side}"].x - front.torso_x)
         shoulder = abs(marks[f"shoulder_{side}"].x - front.torso_x)

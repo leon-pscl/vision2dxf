@@ -21,9 +21,9 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from bench.render_silhouettes import MM_PER_PX, View, render_body
-from bodymeasure.config import Calibration, load_schema
-from bodymeasure.landmarks import as_dict, find_front_landmarks, find_side_landmarks
+from bench.render_silhouettes import render_body
+from bodymeasure.config import load_schema
+from bodymeasure.landmarks import as_dict, find_front_landmarks, find_side_landmarks, view_scale
 from bodymeasure.measure import MeasurementSet, SideView, measure
 from bodymeasure.vision import load_models
 
@@ -47,20 +47,6 @@ class BodyResult:
     export_path: Path
 
 
-def calibration_for(view: View) -> Calibration:
-    """Return the calibration the renderer implies: 1 mm/px and a known floor."""
-    return Calibration(
-        camera_matrix=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-        dist_coeffs=[0.0] * 5,
-        image_size=[view.mask.shape[1], view.mask.shape[0]],
-        rotation=0,
-        mm_per_px_x=MM_PER_PX,
-        mm_per_px_y=MM_PER_PX,
-        floor_row=view.floor_row,
-        calibrated_at="bench",
-    )
-
-
 def keypoints_for(shaded: np.ndarray) -> np.ndarray:
     """Return COCO-17 keypoints from the pose model on a shaded rendering.
 
@@ -78,8 +64,11 @@ def keypoints_for(shaded: np.ndarray) -> np.ndarray:
     return data[int(np.argmax(confidences))].astype(float)
 
 
-def measure_body(path: Path) -> MeasurementSet:
+def measure_body(path: Path, height_cm: float) -> MeasurementSet:
     """Render one mesh and run the whole engine on it.
+
+    ``height_cm`` is the body's published height: the engine's scale, so the bench
+    must not assume one height for five different bodies.
 
     Raises:
         ValueError: if rendering or landmarking cannot proceed.
@@ -87,21 +76,22 @@ def measure_body(path: Path) -> MeasurementSet:
     """
     views = render_body(path)
     front, side = views["front"], views["side"]
-    calibration = calibration_for(front)
 
     front_kp = keypoints_for(front.shaded)
     side_kp = keypoints_for(side.shaded)
 
-    front_marks = find_front_landmarks(front.mask, front_kp, calibration.mm_per_px_x)
-    rows = as_dict(front_marks)
-    front_rows = {
-        "armpit": int(rows["armpit_row"].y),
-        "waist": int(rows["waist_row"].y),
-        "crotch": int(rows["crotch_row"].y),
+    front_marks = find_front_landmarks(front.mask, front_kp, height_cm)
+    front_rows = as_dict(front_marks)
+    front_scale = view_scale(front_marks, height_cm)
+    front_heights = {
+        name: front_scale.height_mm(front_rows[f"{name}_row"].y)
+        for name in ("armpit", "waist", "crotch")
     }
-    side_marks = find_side_landmarks(side.mask, side_kp, "side_left", front_rows)
-    side_view = SideView(name="side_left", mask=side.mask, landmarks=as_dict(side_marks))
-    return measure(front.mask, front_marks, [side_view], front_kp, calibration)
+    side_marks = find_side_landmarks(side.mask, side_kp, "side_left", front_heights, height_cm)
+    side_view = SideView(
+        name="side_left", mask=side.mask, landmarks=as_dict(side_marks), height_cm=height_cm
+    )
+    return measure(front.mask, front_marks, [side_view], front_kp, height_cm)
 
 
 def load_truth(path: Path) -> dict[str, float]:
@@ -205,7 +195,8 @@ def main(argv: list[str]) -> int:
             print(f"{name}: SKIPPED, no {mesh_path.name} or {truth_path.name}")
             continue
         try:
-            measurements = measure_body(mesh_path)
+            truth = load_truth(truth_path)
+            measurements = measure_body(mesh_path, truth["height"])
         except Exception as error:  # noqa: BLE001 - a bench reports failures, it does not raise
             print(f"{name}: FAILED, {type(error).__name__}: {error}")
             continue
@@ -214,9 +205,7 @@ def main(argv: list[str]) -> int:
         export_path.write_text(
             yaml.safe_dump({"body": measurements.body()}, sort_keys=True), encoding="utf-8"
         )
-        results.append(
-            BodyResult(name, measurements.body(), load_truth(truth_path), export_path)
-        )
+        results.append(BodyResult(name, measurements.body(), truth, export_path))
         status = check_pygarment(export_path, bodies_dir.parent.parent)
         print(f"{name}: measured, pygarment {status}")
 

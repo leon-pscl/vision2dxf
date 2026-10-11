@@ -37,7 +37,6 @@ class PathsConfig(_Strict):
     """Data locations, relative to the repository root."""
 
     sessions: str
-    calib: str
 
 
 class StorageConfig(_Strict):
@@ -63,16 +62,22 @@ class AppConfig(_Strict):
 
 
 class Calibration(_Strict):
-    """Contents of ``config/calibration.yaml``, written by the calibration page."""
+    """Contents of the optional ``config/calibration.yaml``.
 
-    camera_matrix: list[list[float]]
-    dist_coeffs: list[float]
-    image_size: list[int]
-    rotation: int
-    mm_per_px_x: float
-    mm_per_px_y: float
-    floor_row: int
-    calibrated_at: Any
+    The lens model only: there is no scale here, because the millimetres per
+    pixel come from the subject's measured height on each view
+    (``landmarks.ViewScale``). ``camera_matrix`` is optional because a station
+    may run uncorrected; without it frames are measured as they arrive.
+    """
+
+    camera_matrix: list[list[float]] | None = None
+    dist_coeffs: list[float] | None = None
+    rotation: int = 0
+
+    @property
+    def has_lens_model(self) -> bool:
+        """Return whether frames can be undistorted."""
+        return self.camera_matrix is not None and self.dist_coeffs is not None
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:

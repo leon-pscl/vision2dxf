@@ -12,7 +12,7 @@ import pytest
 from bodymeasure.config import ROOT
 
 WEB = ROOT / "web"
-PAGES = ("index.html", "calibrate.html", "review.html")
+PAGES = ("index.html", "review.html")
 ID_CALL = re.compile(r'\bel\("([^"]+)"\)')
 VIEW_ROW = re.compile(r'li\[data-view="\$\{view\}"\]')
 
@@ -45,6 +45,7 @@ def test_the_capture_page_has_the_controls_the_brief_requires() -> None:
         'id="consent"',
         'id="subject-id"',
         'id="sex"',
+        'id="height-cm"',
         'id="preview"',
         'id="measure"',
         'data-action="retake"',
@@ -54,17 +55,35 @@ def test_the_capture_page_has_the_controls_the_brief_requires() -> None:
         assert f'data-view="{view}"' in page
 
 
+def test_the_height_is_asked_for_with_the_hint_the_change_specifies() -> None:
+    """Change 1: measured by the tailor, and the whole body is scaled by it."""
+    page = (WEB / "index.html").read_text(encoding="utf-8")
+    assert "Measured by tailor, shoes off. Do not use the client's own estimate." in page
+
+
+def test_the_capture_instructions_are_on_screen() -> None:
+    """Change 6: what the subject must do, where they can read it."""
+    page = (WEB / "index.html").read_text(encoding="utf-8").lower()
+    for instruction in ("shoes off", "hair tied flat", "tight cap", "fitted clothing", "a-pose"):
+        assert instruction in page, instruction
+
+
 def test_uploads_are_offered_wherever_the_camera_is(script: str) -> None:
     """The demo must work without the station (brief 6)."""
     page = (WEB / "index.html").read_text(encoding="utf-8")
     assert page.count('type="file"') == 3, "one upload per view"
-    assert 'id="upload-frames"' in (WEB / "calibrate.html").read_text(encoding="utf-8")
 
 
 def test_the_preview_sends_the_unrotated_frame(script: str) -> None:
     """Rotating in the browser as well as on the server would double-rotate."""
     assert "video.videoWidth" in script
     assert "rawFrame" in script
+
+
+def test_the_calibration_page_is_gone() -> None:
+    """The scale is the subject's height, so there is nothing left to calibrate."""
+    assert not (WEB / "calibrate.html").exists()
+    assert "initCalibrate" not in (WEB / "app.js").read_text(encoding="utf-8")
 
 
 def test_the_review_page_has_what_the_brief_asks_for() -> None:

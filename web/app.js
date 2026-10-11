@@ -21,98 +21,6 @@ async function post(url, data, output) {
   return body;
 }
 
-function initCalibrate() {
-  const page = el("calibrate");
-  if (!page) return;
-
-  const video = el("preview");
-  let frames = [];
-  let lastBoard = null;
-
-  const boardParams = () => ({
-    pattern_cols: el("cols").value,
-    pattern_rows: el("rows").value,
-    square_mm: el("square").value,
-  });
-
-  // The preview runs at the camera's full resolution, so a grabbed frame is
-  // exactly what the station will capture later.
-  function snapshot() {
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext("2d").drawImage(video, 0, 0);
-    return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-  }
-
-  async function show(url, data, output) {
-    const body = await post(url, data, output);
-    if (body) output.textContent = JSON.stringify(body, null, 2);
-    return body;
-  }
-
-  function countFrames() {
-    el("frame-count").textContent = `${frames.length} frames`;
-    el("compute-intrinsics").disabled = frames.length === 0;
-  }
-
-  el("start-camera").addEventListener("click", async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1920 }, height: { ideal: 1080 } },
-    });
-    video.srcObject = stream;
-    el("grab").disabled = false;
-    el("measure-scale").disabled = false;
-  });
-
-  el("grab").addEventListener("click", async () => {
-    frames.push(await snapshot());
-    countFrames();
-  });
-
-  el("upload-frames").addEventListener("change", (event) => {
-    frames = Array.from(event.target.files);
-    countFrames();
-  });
-
-  el("compute-intrinsics").addEventListener("click", async () => {
-    const data = form(boardParams());
-    frames.forEach((frame, index) => data.append("frames", frame, `frame${index}.png`));
-    const body = await show("/api/calibration/checkerboard", data, el("intrinsics-out"));
-    if (body) {
-      frames = [];
-      countFrames();
-    }
-  });
-
-  // Measuring grabs a fresh frame; saving reuses it, so the operator commits the
-  // exact numbers shown.
-  async function board(fresh) {
-    const uploaded = el("upload-board").files[0];
-    if (uploaded) return uploaded;
-    if (fresh || !lastBoard) lastBoard = await snapshot();
-    return lastBoard;
-  }
-
-  async function measure(save) {
-    const frame = await board(!save);
-    const data = form({ ...boardParams(), bottom_margin_mm: el("margin").value, save });
-    data.append("frame", frame, "board.png");
-    return show("/api/calibration/scale", data, save ? el("save-out") : el("scale-out"));
-  }
-
-  el("upload-board").addEventListener("change", (event) => {
-    lastBoard = event.target.files[0];
-    el("measure-scale").disabled = false;
-  });
-
-  el("measure-scale").addEventListener("click", async () => {
-    el("save").disabled = (await measure(false)) === null;
-  });
-
-  el("save").addEventListener("click", () => measure(true));
-}
-
 function initCapture() {
   const page = el("capture");
   if (!page) return;
@@ -122,19 +30,18 @@ function initCapture() {
   const context = preview.getContext("2d");
   const passed = new Set();
   let sessionId = null;
-  let calibration = null;
+  let rotationDegrees = 0;
   let countdown = 0;
 
   fetch("/api/health")
     .then((response) => response.json())
     .then((health) => {
-      calibration = health.calibration;
+      rotationDegrees = ((health.camera_rotation % 360) + 360) % 360;
       const parts = [
-        health.calibrated ? "calibrated" : "NOT calibrated — run the calibration page",
+        health.calibrated ? "lens corrected" : "lens distortion not corrected",
         health.weights ? "models loaded" : "model weights missing from models/",
       ];
       el("station-status").textContent = parts.join(" · ");
-      el("consent-version").textContent = `consent form `;
     })
     .catch((error) => {
       el("station-status").textContent = `backend unreachable: ${error.message}`;
@@ -143,7 +50,7 @@ function initCapture() {
   // The camera is mounted portrait and the server rotates every frame, so the
   // preview is rotated to match. What the operator sees is what gets measured.
   function rotation() {
-    return calibration ? ((calibration.rotation % 360) + 360) % 360 : 0;
+    return rotationDegrees;
   }
 
   function previewSize() {
@@ -157,20 +64,6 @@ function initCapture() {
   function drawGuide() {
     const { width, height } = preview;
     if (!width || !height) return;
-
-    if (calibration) {
-      // floor_row is in calibrated pixels; the camera may run at another size.
-      const row = (calibration.floor_row / calibration.image_size[1]) * height;
-      context.strokeStyle = "rgba(255, 80, 80, 0.9)";
-      context.lineWidth = 3;
-      context.beginPath();
-      context.moveTo(0, row);
-      context.lineTo(width, row);
-      context.stroke();
-      context.fillStyle = "rgba(255, 80, 80, 0.9)";
-      context.font = "20px sans-serif";
-      context.fillText("floor mark", 10, row - 10);
-    }
 
     const centre = width / 2;
     const top = height * 0.06;
@@ -192,6 +85,15 @@ function initCapture() {
     context.lineTo(centre + span * 0.1, top + span * 0.52);
     context.lineTo(centre + span * 0.08, floor);
     context.stroke();
+    context.setLineDash([]);
+
+    // The gate wants 8% clear above and below and the body in the middle third,
+    // so the guide shows exactly those bounds.
+    context.strokeStyle = "rgba(255, 200, 0, 0.6)";
+    context.setLineDash([6, 8]);
+    context.lineWidth = 2;
+    const margin = height * 0.08;
+    context.strokeRect(centre - width * 0.15, margin, width * 0.3, height - 2 * margin);
     context.setLineDash([]);
 
     if (countdown > 0) {
@@ -284,6 +186,7 @@ function initCapture() {
         subject_code: el("subject-id").value.trim(),
         sex: el("sex").value,
         consent: el("consent").checked,
+        height_cm: el("height-cm").value,
       }),
       el("session-out"),
     );
@@ -337,7 +240,6 @@ function initCapture() {
   drawPreview();
 }
 
-initCalibrate();
 initCapture();
 initReview();
 

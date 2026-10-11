@@ -74,47 +74,45 @@ def _confidence_reasons(
     return [f"Cannot see the {', '.join(missing)} clearly: check lighting and framing"]
 
 
-def _framing_reasons(mask: np.ndarray, margin_frac: float) -> list[str]:
-    """Check the body sits wholly inside the frame with a margin top and bottom."""
+def _framing_reasons(mask: np.ndarray, thresholds: Mapping[str, float]) -> list[str]:
+    """Check the body fills the frame and stands in the middle of it.
+
+    There is no floor mark to stand on any more: the scale comes from the
+    subject's height, so what the gate must protect is the whole body being in
+    frame at a usable size - top and bottom margins, a tall enough silhouette,
+    and the body near the middle column so the lens sees it square on.
+    """
     rows = np.flatnonzero(np.asarray(mask).any(axis=1))
     columns = np.flatnonzero(np.asarray(mask).any(axis=0))
     if rows.size == 0:
         return ["No person found in the frame"]
 
     height, width = mask.shape
-    margin_px = margin_frac * height
+    margin_px = thresholds["frame_margin_frac"] * height
     reasons = []
     if rows.min() < margin_px:
         reasons.append("Head is too close to the top of the frame: step back or tilt the camera")
     if height - 1 - rows.max() < margin_px:
         reasons.append("Feet are too close to the bottom of the frame: step back")
+    if rows.max() - rows.min() + 1 < thresholds["body_height_frac"] * height:
+        reasons.append("Stand further away so the whole body fits in the frame")
+    offset = abs((columns.min() + columns.max()) / 2 - width / 2)
+    if offset > thresholds["body_centre_band_frac"] * width / 2:
+        reasons.append("Move towards the middle of the frame: stand square to the camera")
     if columns.min() == 0 or columns.max() == width - 1:
         reasons.append("Body is cut off at the side of the frame: step back")
     return reasons
-
-
-def _floor_reasons(mask: np.ndarray, floor_row: int, tolerance_px: float) -> list[str]:
-    rows = np.flatnonzero(np.asarray(mask).any(axis=1))
-    if rows.size == 0:
-        return []
-    offset = int(rows.max()) - floor_row
-    if abs(offset) <= tolerance_px:
-        return []
-    direction = "behind" if offset < 0 else "in front of"
-    return [f"Stand on the floor mark: feet are {abs(offset)} px {direction} it"]
 
 
 def gate_front(
     mask: np.ndarray,
     keypoints: np.ndarray,
     thresholds: Mapping[str, float],
-    floor_row: int,
 ) -> GateResult:
-    """Gate a front capture: all keypoints visible, A-pose, framing, floor mark."""
+    """Gate a front capture: all keypoints visible, A-pose, and framing."""
     min_conf = thresholds["keypoint_conf"]
     reasons = _confidence_reasons(keypoints, tuple(range(len(KEYPOINT_NAMES))), min_conf)
-    reasons += _framing_reasons(mask, thresholds["frame_margin_frac"])
-    reasons += _floor_reasons(mask, floor_row, thresholds["floor_row_tol_px"])
+    reasons += _framing_reasons(mask, thresholds)
 
     shoulder_mid = (keypoints[L_SHOULDER, :2] + keypoints[R_SHOULDER, :2]) / 2
     hip_mid = (keypoints[L_HIP, :2] + keypoints[R_HIP, :2]) / 2
@@ -159,15 +157,13 @@ def gate_side(
     mask: np.ndarray,
     keypoints: np.ndarray,
     thresholds: Mapping[str, float],
-    floor_row: int,
     front_shoulder_px: float,
 ) -> GateResult:
-    """Gate a side capture: visible side seen, truly side-on, framing, floor mark."""
+    """Gate a side capture: visible side seen, truly side-on, and framing."""
     min_conf = thresholds["keypoint_conf"]
     side = visible_side(keypoints)
     reasons = _confidence_reasons(keypoints, SIDE_KEYPOINTS[side], min_conf)
-    reasons += _framing_reasons(mask, thresholds["frame_margin_frac"])
-    reasons += _floor_reasons(mask, floor_row, thresholds["floor_row_tol_px"])
+    reasons += _framing_reasons(mask, thresholds)
 
     span = abs(float(keypoints[L_SHOULDER, 0] - keypoints[R_SHOULDER, 0]))
     limit = thresholds["side_shoulder_ratio_max"] * front_shoulder_px
