@@ -273,7 +273,9 @@ def narrowest_cross_section(
     """Return the ends of the thinnest cut perpendicular to ``direction``.
 
     Used for the wrist: the arm is sampled along the elbow-wrist line within
-    ``search_px`` of the keypoint, and the thinnest cut across it wins.
+    ``search_px`` of the keypoint, and the thinnest cut across it wins. The same
+    distance is allowed sideways, because a wrist keypoint often lands just off
+    a silhouette that stops short of the hand.
 
     Raises:
         ValueError: if the arm is not found anywhere in the search range.
@@ -293,8 +295,14 @@ def narrowest_cross_section(
         inside = (rows >= 0) & (rows < mask.shape[0]) & (columns >= 0) & (columns < mask.shape[1])
         hit = np.zeros(len(offsets), dtype=bool)
         hit[inside] = np.asarray(mask)[rows[inside], columns[inside]] > 0
-        run = next(
-            (item for item in runs_in_row(hit[None, :], 0) if item[0] <= middle <= item[1]), None
+        run = min(
+            (
+                item
+                for item in runs_in_row(hit[None, :], 0)
+                if item[0] - search_px <= middle <= item[1] + search_px
+            ),
+            key=lambda item: max(item[0] - middle, middle - item[1], 0),
+            default=None,
         )
         if run is None:
             continue  # the sample centre has left the arm

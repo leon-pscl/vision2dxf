@@ -51,16 +51,26 @@ def test_a_wrist_over_the_torso_is_rejected(thresholds: dict[str, float]) -> Non
 def test_a_hidden_keypoint_is_named(thresholds: dict[str, float]) -> None:
     person = make_person()
     keypoints = person.keypoints.copy()
-    keypoints[15, 2] = 0.2  # left ankle
+    keypoints[9, 2] = 0.2  # left wrist
     result = gate_front(person.mask, keypoints, thresholds)
     assert not result.ok
-    assert any("left ankle" in reason for reason in result.reasons)
+    assert any("left wrist" in reason for reason in result.reasons)
+
+
+def test_a_hidden_leg_keypoint_still_passes(thresholds: dict[str, float]) -> None:
+    """Nothing is measured off the legs or the face, so a soft ankle is no retake."""
+    person = make_person(arm_angle_deg=30.0)
+    keypoints = person.keypoints.copy()
+    keypoints[[0, 1, 2, 13, 14, 15, 16], 2] = 0.05  # face, knees and ankles
+    assert gate_front(person.mask, keypoints, thresholds).ok
 
 
 def test_a_body_too_close_to_the_top_is_rejected(thresholds: dict[str, float]) -> None:
-    """Eight per cent of the frame must stay clear above the head."""
+    """The configured margin of frame must stay clear above the head."""
     person = make_person()
-    shift = int(0.05 * person.mask.shape[0])  # leaves 4% above the head
+    height = person.mask.shape[0]
+    top = int(np.flatnonzero(person.mask.any(axis=1))[0])
+    shift = top - int(thresholds["frame_margin_frac"] * height) + 1  # leaves under the margin
     cropped = np.zeros_like(person.mask)
     cropped[:-shift] = person.mask[shift:]
     keypoints = person.keypoints.copy()
@@ -71,14 +81,18 @@ def test_a_body_too_close_to_the_top_is_rejected(thresholds: dict[str, float]) -
 
 
 def test_a_body_too_short_in_the_frame_is_rejected(thresholds: dict[str, float]) -> None:
-    """Below 70% of the frame height there are too few pixels per millimetre."""
+    """Below the configured span there are too few pixels per millimetre.
+
+    The fix is to come closer, not to step back: the body has to fill the frame,
+    or every millimetre the engine reports is quantised over too few pixels.
+    """
     person = make_person()
-    kept = int(0.69 * person.mask.shape[0])
+    kept = int((thresholds["body_height_frac"] - 0.01) * person.mask.shape[0])
     squashed = np.zeros_like(person.mask)
     squashed[:kept] = person.mask[:kept]
     result = gate_front(squashed, person.keypoints, thresholds)
     assert not result.ok
-    assert any("further away" in reason for reason in result.reasons)
+    assert any("too small in the frame" in reason for reason in result.reasons)
 
 
 def test_a_body_off_to_one_side_is_rejected(thresholds: dict[str, float]) -> None:

@@ -121,6 +121,15 @@ def test_the_narrowest_cross_section_measures_across_the_arm(front: object) -> N
     assert width == pytest.approx(ARM_THICKNESS, abs=6)
 
 
+def test_the_cross_section_survives_a_wrist_keypoint_off_the_arm(front: object) -> None:
+    """Real masks stop short of the hand, leaving the keypoint just outside."""
+    elbow = front.keypoints[7, :2]
+    wrist = front.keypoints[9, :2] + np.array([ARM_THICKNESS, 0.0])  # off the silhouette
+    start, end = narrowest_cross_section(front.mask, wrist, wrist - elbow, search_px=40)
+    width = float(np.linalg.norm(end - start))
+    assert width == pytest.approx(ARM_THICKNESS, abs=6)
+
+
 def test_every_front_landmark_is_found(front: object) -> None:
     marks = as_dict(find_front_landmarks(front.mask, front.keypoints, HEIGHT_CM))
     expected = {

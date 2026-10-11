@@ -158,6 +158,23 @@ def test_the_largest_person_wins_and_other_classes_are_ignored() -> None:
     mask = vision._largest_person_mask(result, (40, 40), 0.5)
     assert mask[20, 20], "should pick the larger of the two people"
     assert not mask[32, 32], "the dog is not a person"
+    assert mask.sum() == 900, "the smaller person must not be merged in"
+
+
+def _split_body() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """One body detected twice, as a real capture does: a torso and bare legs."""
+    masks = np.zeros((2, 40, 40), dtype=float)
+    masks[0, 0:20, 0:20] = 1.0  # head to mid-thigh, confident
+    masks[1, 20:40, 0:20] = 1.0  # hips to feet, scored low
+    return masks, np.array([0, 0]), np.array([0.83, 0.26])
+
+
+def test_a_body_split_into_two_instances_is_rejoined() -> None:
+    """Half a mask would scale every measurement off the wrong floor row."""
+    masks, classes, confidences = _split_body()
+    mask = vision._largest_person_mask(_Result(masks, classes, confidences), (40, 40), 0.15)
+    assert mask.sum() == 800, "both halves are one body"
+    assert mask[5, 5] and mask[35, 5]
 
 
 def test_people_below_the_confidence_threshold_are_dropped() -> None:

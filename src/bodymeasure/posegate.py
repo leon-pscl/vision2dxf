@@ -41,6 +41,21 @@ L_WRIST, R_WRIST = 9, 10
 L_HIP, R_HIP = 11, 12
 L_KNEE, R_KNEE = 13, 14
 L_ANKLE, R_ANKLE = 15, 16
+# Only these feed the landmarks and the measurements, so a soft ankle or a
+# turned-away eye must not cost the operator a retake. The legs still have to be
+# in the mask: the scale comes from its head-to-floor span, not from keypoints.
+MEASURED_KEYPOINTS = (
+    L_EAR,
+    R_EAR,
+    L_SHOULDER,
+    R_SHOULDER,
+    L_ELBOW,
+    R_ELBOW,
+    L_WRIST,
+    R_WRIST,
+    L_HIP,
+    R_HIP,
+)
 SIDE_KEYPOINTS = {
     "left": (L_SHOULDER, L_HIP, L_KNEE, L_ANKLE),
     "right": (R_SHOULDER, R_HIP, R_KNEE, R_ANKLE),
@@ -95,7 +110,7 @@ def _framing_reasons(mask: np.ndarray, thresholds: Mapping[str, float]) -> list[
     if height - 1 - rows.max() < margin_px:
         reasons.append("Feet are too close to the bottom of the frame: step back")
     if rows.max() - rows.min() + 1 < thresholds["body_height_frac"] * height:
-        reasons.append("Stand further away so the whole body fits in the frame")
+        reasons.append("Body too small in the frame: step closer, or crop an uploaded photo")
     offset = abs((columns.min() + columns.max()) / 2 - width / 2)
     if offset > thresholds["body_centre_band_frac"] * width / 2:
         reasons.append("Move towards the middle of the frame: stand square to the camera")
@@ -109,9 +124,9 @@ def gate_front(
     keypoints: np.ndarray,
     thresholds: Mapping[str, float],
 ) -> GateResult:
-    """Gate a front capture: all keypoints visible, A-pose, and framing."""
+    """Gate a front capture: the measured keypoints visible, A-pose, and framing."""
     min_conf = thresholds["keypoint_conf"]
-    reasons = _confidence_reasons(keypoints, tuple(range(len(KEYPOINT_NAMES))), min_conf)
+    reasons = _confidence_reasons(keypoints, MEASURED_KEYPOINTS, min_conf)
     reasons += _framing_reasons(mask, thresholds)
 
     shoulder_mid = (keypoints[L_SHOULDER, :2] + keypoints[R_SHOULDER, :2]) / 2

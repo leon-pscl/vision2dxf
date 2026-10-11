@@ -157,13 +157,16 @@ warnings:
 ### 5.2 Pose gate (`posegate.py`) - return `(ok: bool, reasons: list[str])`
 Use COCO-17 keypoints (0 nose, 1/2 eyes, 3/4 ears, 5/6 shoulders, 7/8 elbows,
 9/10 wrists, 11/12 hips, 13/14 knees, 15/16 ankles).
-- Front: all 17 keypoints confidence >= 0.5 (from app.yaml).
-- Front: each upper arm 20-45 degrees from the torso line (A-pose). Wrists must not overlap the torso mask.
+- Front: confidence >= 0.5 (from app.yaml) on the keypoints that are actually
+  measured - ears, shoulders, elbows, wrists, hips. The face and the legs are
+  not measured off keypoints, so they do not gate.
+- Front: each upper arm 15-60 degrees from the torso line (A-pose). Wrists must not overlap the torso mask.
 - Side: the visible side's shoulder, hip, knee and ankle confidence >= 0.5. The
   shoulder-to-shoulder horizontal distance must be < 25% of the front view's (truly side-on).
-- Every view: top and bottom margins each >= 8% of the frame height, the mask
-  spanning >= 70% of the frame height, and the body's horizontal centre within
-  the middle 30% of the frame width. There is no floor mark to stand on.
+- Every view: top and bottom margins each >= 2% of the frame height (enough to
+  prove the body is not cut off, since the scale is its head-to-floor span), the
+  mask spanning >= 60% of the frame height, and the body's horizontal centre
+  within the middle 30% of the frame width. There is no floor mark to stand on.
 - The reasons are shown to the operator verbatim, e.g. "Left arm too close to body".
 
 ### 5.3 Mask clean-up (`mask_clean.py`)

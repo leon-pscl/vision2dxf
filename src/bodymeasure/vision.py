@@ -14,6 +14,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import cv2
 import numpy as np
 
 from bodymeasure.config import ROOT, load_app_config
@@ -25,6 +26,13 @@ if TYPE_CHECKING:  # pragma: no cover - import cost only matters at runtime
 
 PERSON_CLASS = 0
 _MASK_BINARY_THRESHOLD = 0.5
+# One body is often detected twice - a torso, and the bare legs below it - and the
+# second half scores far lower (0.26 against 0.83 on a real capture). Detections
+# are therefore filtered low and then by size: a region within
+# MERGE_AREA_FRACTION of the biggest one is part of the same body, and anything
+# smaller is not, which is what keeps a second person out of the subject's mask.
+MERGE_CONF = 0.15
+MERGE_AREA_FRACTION = 0.3
 
 
 @dataclass(frozen=True)
@@ -77,10 +85,15 @@ def load_models() -> tuple[YOLO, YOLO]:
 def _largest_person_mask(
     result: Results, shape: tuple[int, int], min_conf: float
 ) -> np.ndarray:
-    """Return the largest person instance mask, resized to ``shape``.
+    """Return the subject's mask, rejoining a body the model split in two.
+
+    Every person instance within ``MERGE_AREA_FRACTION`` of the biggest one is
+    unioned in, so a torso and the legs detected separately make one silhouette.
+    A smaller person-shaped region is left out, which is what keeps a second
+    person, a poster or a dog out of the subject's mask.
 
     Raises:
-        ValueError: if no person passes ``min_conf``.
+        ValueError: if no person-shaped region passes ``min_conf``.
 
     """
     masks = getattr(result, "masks", None)
@@ -98,13 +111,16 @@ def _largest_person_mask(
     if not candidates:
         raise ValueError("No person found in the frame")
 
-    best = max(candidates, key=lambda index: float(data[index].sum()))
-    mask = data[best]
-    if mask.shape != shape:
-        import cv2
-
-        mask = cv2.resize(mask, (shape[1], shape[0]), interpolation=cv2.INTER_NEAREST)
-    return mask > _MASK_BINARY_THRESHOLD
+    floor = max(float(data[index].sum()) for index in candidates) * MERGE_AREA_FRACTION
+    mask = np.zeros(shape, dtype=bool)
+    for index in candidates:
+        if float(data[index].sum()) < floor:
+            continue
+        part = data[index]
+        if part.shape != shape:
+            part = cv2.resize(part, (shape[1], shape[0]), interpolation=cv2.INTER_NEAREST)
+        mask |= part > _MASK_BINARY_THRESHOLD
+    return mask
 
 
 def _best_keypoints(result: Results) -> np.ndarray:
@@ -139,7 +155,7 @@ def analyse(image: np.ndarray) -> ViewAnalysis:
         image,
         imgsz=config.models.imgsz,
         retina_masks=config.models.retina_masks,
-        conf=config.thresholds["mask_conf"],
+        conf=MERGE_CONF,
         verbose=False,
     )[0]
     seg_ms = (time.perf_counter() - started) * 1000
@@ -150,7 +166,7 @@ def analyse(image: np.ndarray) -> ViewAnalysis:
     )[0]
     pose_ms = (time.perf_counter() - started) * 1000
 
-    raw = _largest_person_mask(seg_result, shape, config.thresholds["mask_conf"])
+    raw = _largest_person_mask(seg_result, shape, MERGE_CONF)
     return ViewAnalysis(
         mask=clean_mask(
             raw,

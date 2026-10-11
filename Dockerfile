@@ -35,7 +35,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # and the GarmentCode clone it reads is bind-mounted from the host.
 RUN pip install --no-cache-dir -r requirements-bench.txt
 
+# The YOLO26 weights are git-ignored, so a fresh clone has none and every capture
+# used to fail with "model weights missing". The entrypoint fetches whatever
+# models/ is missing on start-up; nothing to bake into the image.
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 COPY . .
 
 EXPOSE 8000
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["uvicorn", "bodymeasure.api:app", "--host", "0.0.0.0", "--port", "8000"]

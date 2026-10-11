@@ -49,7 +49,8 @@ docker compose down
 Rebuild with `--build` whenever `requirements.txt` or the Dockerfile changes:
 `docker compose up` on its own reuses the old image and will keep serving stale
 dependencies. The whole repository is bind-mounted and uvicorn runs with
-`--reload`, so every edit applies live.
+`--reload`, so every edit applies live. The first start also fetches the model
+weights the checkout is missing; see *Model weights*.
 
 Dependencies live in a venv at `/opt/venv` inside the image, already on `PATH`.
 Shell in with `docker compose exec app bash` — not `bash -l`, because a login
@@ -156,16 +157,22 @@ Open `/` and work down the page.
 1. **Subject.** Enter the id, sex and **height**, tick consent, press *Start
    session*. No image is captured until consent is ticked; the server refuses
    otherwise, and it refuses a height outside 100-220 cm.
-2. **Camera.** Press *Start camera*. The preview is rotated to match the
-   configured rotation, so what you see is what gets measured. The yellow box is
-   where the body must sit: 8% clear top and bottom, filling at least 70% of the
-   frame, and within the middle third across.
+2. **Camera.** Press *Start camera*. The browser is asked for a portrait stream
+   (1080x1920), so the camera is bolted in the right way up and needs no physical
+   rotation. The yellow box is where the body must sit: 8% clear top and bottom,
+   filling at least 70% of the frame, and within the middle third across.
 3. **Captures.** On screen, and worth reading to the subject:
    **shoes off**; **hair tied flat or a tight cap**; **fitted clothing**, no thick
-   layers; **A-pose**, arms 20-45 degrees from the body and not touching it. Each
-   *Capture* button counts down from three. The server segments the frame and
-   runs the pose gate: a tick means the view is usable, otherwise the reasons
-   appear and *Retake* clears it.
+   layers; **A-pose**, arms 20-45 degrees from the body and not touching it.
+
+   Press *Start capture* in section 2 and the run takes over: front, left side,
+   right side in turn, each with a five-second countdown to get into the pose and
+   a five-second one to hold still, and a shutter flash at the shot. The capture
+   buttons in section 3 take a single view instead, counting down from three, and
+   are what *Retake* leaves for redoing one view.
+
+   The server segments each frame and runs the pose gate: a tick means the view is
+   usable, otherwise the reasons appear and *Retake* clears it.
 4. **Measure.** Enabled once the front and at least one side view pass. It
    writes both YAML files and offers them for download.
 
@@ -189,9 +196,12 @@ nothing reads them unless the button is pressed.
 - The committed ones are renders of the GarmentCode reference body, not
   photographs of anyone, so the repository carries no image of a real person.
 
-Uploads and samples are sent as already upright. The station's camera is mounted
-portrait, so a *live* capture arrives sideways and the server turns it; turning a
-photograph a second time would lay the subject down.
+Uploads, samples and live frames are all sent as already upright: the browser
+asks the camera for a portrait stream, so a photograph and a live frame arrive the
+same way and the server turns neither. `camera.rotation` in `config/app.yaml` is
+only the fallback for a camera that ignores the portrait request, and
+`tools/calibrate_lens_on_monitor.py` still needs it because it grabs its own
+frames.
 
 ## Capturing from another machine
 
@@ -237,8 +247,13 @@ After measuring, open `/review/<session id>`.
 
 ## Model weights
 
-The two YOLO26 files are git-ignored and not baked into the image. Fetch them
-once, into `models/`:
+The two YOLO26 files are git-ignored, so a fresh clone has none. In Docker
+there is nothing to do: `docker/entrypoint.sh` checks `models/` on every start
+and fetches only the files that are missing, into the bind-mounted checkout, so
+it runs once per machine and is offline from then on. A checkout that already
+carries its own weights is left alone and never reaches the network.
+
+Run it without Docker, fetch them by hand:
 
 ```bash
 python -c "from ultralytics import YOLO; YOLO('yolo26s-seg.pt'); YOLO('yolo26s-pose.pt')"
@@ -311,6 +326,7 @@ interrupted write leaves the previous file intact.
   webcam. Reaching the station from another machine over the LAN does not work,
   though - `getUserMedia` is refused on a plain-http origin that is not
   localhost. See *Capturing from another machine* below.
-- Model weights are not baked into the image; `models/` is bind-mounted.
+- The first start of a checkout with no weights needs the network to fetch them;
+  after that they are on the host and nothing reaches out again.
 - `bust_points` and `bum_points` are not visible in a silhouette at all. They
   start from the GarmentCode ratios and should be entered by tape.

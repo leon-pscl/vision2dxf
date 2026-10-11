@@ -83,11 +83,25 @@ def test_each_view_offers_its_own_stored_sample(script: str) -> None:
     assert '/samples/${view}.jpg' in script
 
 
-def test_a_live_capture_is_turned_but_an_upload_is_not(script: str) -> None:
-    """The camera is mounted portrait; a photograph off disk already is not."""
-    assert "sendView(view, await rawFrame(), false)" in script
+def test_a_live_capture_is_sent_upright_and_so_is_an_upload(script: str) -> None:
+    """The camera is asked for a portrait stream, so nothing has to be turned."""
+    assert "height: { ideal: 1920 }" in script
+    assert "width: { ideal: 1080 }" in script
+    assert "sendView(view, await rawFrame(), isUpright())" in script
+    assert "sendView(event.target.files[0], true)" not in script
     assert "sendView(view, event.target.files[0], true)" in script
-    assert "sendView(view, blob, true)" in script
+
+
+def test_start_capture_runs_all_three_poses_on_their_own(script: str) -> None:
+    """Photobooth, not a silent shutter: pose, hold, flash, move, repeat."""
+    page = (WEB / "index.html").read_text(encoding="utf-8")
+    assert 'id="start-capture"' in page
+    assert "POSE_SECONDS = 5" in script
+    assert "MOVE_SECONDS = 5" in script
+    assert "await countDown(`${name} — hold still`, POSE_SECONDS)" in script
+    assert "await countDown(`next: ${name}`, MOVE_SECONDS)" in script
+    assert "flashUntil = performance.now() + FLASH_MS" in script
+    assert "!sessionId || !live || busy" in script
 
 
 def test_the_three_stored_samples_are_present_and_readable() -> None:

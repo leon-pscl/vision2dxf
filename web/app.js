@@ -1,5 +1,7 @@
 // One script for every page; each init() returns early when its page is absent.
 
+const FLASH_MS = 150; // the shutter flash, long enough for the subject to see
+
 function el(id) {
   return document.getElementById(id);
 }
@@ -31,7 +33,9 @@ function initCapture() {
   const passed = new Set();
   let sessionId = null;
   let rotationDegrees = 0;
-  let countdown = 0;
+  let cue = null; // {label, until} while a capture counts down
+  let busy = false;
+  let flashUntil = 0;
 
   fetch("/api/health")
     .then((response) => response.json())
@@ -47,10 +51,16 @@ function initCapture() {
       el("station-status").textContent = `backend unreachable: ${error.message}`;
     });
 
-  // The camera is mounted portrait and the server rotates every frame, so the
-  // preview is rotated to match. What the operator sees is what gets measured.
+  // The browser is asked for a portrait stream, so the camera needs no physical
+  // rotation and the frame arrives upright. A camera that ignores the request and
+  // hands back a landscape stream still falls back to the configured rotation.
+  function isUpright() {
+    return video.videoHeight > video.videoWidth;
+  }
+
+  // The preview is turned to match, so what the operator sees is what gets measured.
   function rotation() {
-    return rotationDegrees;
+    return isUpright() ? 0 : rotationDegrees;
   }
 
   function previewSize() {
@@ -87,8 +97,8 @@ function initCapture() {
     context.stroke();
     context.setLineDash([]);
 
-    // The gate wants 8% clear above and below and the body in the middle third,
-    // so the guide shows exactly those bounds.
+    // A comfortable frame, looser than the gate: stand inside this and the
+    // capture passes with room to spare.
     context.strokeStyle = "rgba(255, 200, 0, 0.6)";
     context.setLineDash([6, 8]);
     context.lineWidth = 2;
@@ -96,14 +106,23 @@ function initCapture() {
     context.strokeRect(centre - width * 0.15, margin, width * 0.3, height - 2 * margin);
     context.setLineDash([]);
 
-    if (countdown > 0) {
+    if (cue) {
+      const left = Math.max(1, Math.ceil((cue.until - performance.now()) / 1000));
       context.fillStyle = "rgba(0, 0, 0, 0.55)";
       context.fillRect(0, 0, width, height);
       context.fillStyle = "#fff";
-      context.font = `${Math.round(height * 0.2)}px sans-serif`;
       context.textAlign = "center";
-      context.fillText(String(countdown), centre, height / 2);
+      context.font = `${Math.round(height * 0.05)}px sans-serif`;
+      context.fillText(cue.label, centre, height * 0.36);
+      context.font = `${Math.round(height * 0.2)}px sans-serif`;
+      context.fillText(String(left), centre, height / 2);
       context.textAlign = "start";
+    }
+
+    // The shutter, so the subject sees the shot was taken.
+    if (performance.now() < flashUntil) {
+      context.fillStyle = "rgba(255, 255, 255, 0.85)";
+      context.fillRect(0, 0, width, height);
     }
   }
 
@@ -122,8 +141,8 @@ function initCapture() {
     requestAnimationFrame(drawPreview);
   }
 
-  // The raw frame goes to the server unrotated: the server applies the
-  // calibrated rotation itself, and rotating twice would ruin the scale.
+  // The raw frame goes to the server as it comes: the browser already asks for a
+  // portrait stream, so a live frame is upright and must not be turned again.
   function rawFrame() {
     const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
@@ -136,8 +155,32 @@ function initCapture() {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  async function runCountdown(seconds) {
-    for (countdown = seconds; countdown > 0; countdown -= 1) await wait(1000);
+  // The label and the seconds left are painted by drawGuide from `until`, so the
+  // subject watches the countdown rather than a blank frame being sent.
+  async function countDown(label, seconds) {
+    cue = { label, until: performance.now() + seconds * 1000 };
+    await wait(seconds * 1000);
+    cue = null;
+  }
+
+  const POSE_SECONDS = 5; // hold this pose while the countdown runs
+  const MOVE_SECONDS = 5; // to get into the next one
+  const RETAKE_SECONDS = 3; // a single view, when a tailor asks for it
+
+  function viewName(item) {
+    return item.querySelector(".view-name").textContent;
+  }
+
+  // Front, then the two sides, in the order section 3 lists them. Every pose gets
+  // a countdown to hold still through; between poses there is longer to turn.
+  async function captureAll() {
+    for (const [index, item] of [...page.querySelectorAll("li[data-view]")].entries()) {
+      const name = viewName(item);
+      if (index) await countDown(`next: ${name}`, MOVE_SECONDS);
+      await countDown(`${name} — hold still`, POSE_SECONDS);
+      flashUntil = performance.now() + FLASH_MS;
+      await sendView(item.dataset.view, await rawFrame(), isUpright());
+    }
   }
 
   function row(view) {
@@ -149,9 +192,10 @@ function initCapture() {
     for (const item of page.querySelectorAll("li[data-view]")) {
       const view = item.dataset.view;
       item.querySelector('[data-action="capture"]').disabled =
-        !sessionId || !live || passed.has(view);
+        !sessionId || !live || busy || passed.has(view);
       item.querySelector("input[type=file]").disabled = !sessionId;
     }
+    el("start-capture").disabled = !sessionId || !live || busy;
     el("measure").disabled = !(passed.has("front") && (passed.has("side_left") || passed.has("side_right")));
   }
 
@@ -213,10 +257,12 @@ function initCapture() {
     refreshButtons();
   });
 
+  // A portrait stream, so the camera is not mounted on its side. A camera that
+  // cannot deliver one hands back landscape, which isUpright() catches.
   el("start-camera").addEventListener("click", async () => {
     try {
       video.srcObject = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+        video: { width: { ideal: 1080 }, height: { ideal: 1920 } },
       });
       refreshButtons();
     } catch (error) {
@@ -224,11 +270,33 @@ function initCapture() {
     }
   });
 
+  el("start-capture").addEventListener("click", async () => {
+    busy = true;
+    refreshButtons();
+    try {
+      await captureAll();
+    } finally {
+      busy = false;
+      refreshButtons();
+    }
+  });
+
   for (const item of page.querySelectorAll("li[data-view]")) {
     const view = item.dataset.view;
     item.querySelector('[data-action="capture"]').addEventListener("click", async () => {
-      await runCountdown(3);
-      await sendView(view, await rawFrame(), false);
+      // Lock every capture while this one runs, or a double click queues two frames.
+      busy = true;
+      refreshButtons();
+      item.querySelector("output").textContent = "get ready…";
+      item.querySelector("output").className = "";
+      try {
+        await countDown(`${viewName(item)} — hold still`, RETAKE_SECONDS);
+        flashUntil = performance.now() + FLASH_MS;
+        await sendView(view, await rawFrame(), isUpright());
+      } finally {
+        busy = false;
+        refreshButtons();
+      }
     });
     item.querySelector('[data-action="sample"]').addEventListener("click", () => useSample(view));
     item.querySelector("input[type=file]").addEventListener("change", async (event) => {
