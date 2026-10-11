@@ -123,15 +123,17 @@ def _mirror(
     return cv2.flip(image, 1), np.fliplr(mask), flipped
 
 
-def save_view(session_id: str, view: str, image: np.ndarray) -> GateResult:
+def save_view(
+    session_id: str, view: str, image: np.ndarray, upright: bool = False
+) -> GateResult:
     """Prepare, segment and gate one captured view, storing what passed.
 
     A rejected view is still written, so the operator can see the overlay that
-    explains the rejection, but it carries no mask or keypoints.
+    explains the rejection, but it carries no mask or keypoints. ``upright`` marks
+    a frame that is already the right way up, as any upload or stored sample is.
 
     Raises:
-        ValueError: for an unknown view, an uncalibrated station, or a frame
-            with no person in it.
+        ValueError: for an unknown view, or a frame with no person in it.
 
     """
     if view not in VIEWS:
@@ -141,7 +143,7 @@ def save_view(session_id: str, view: str, image: np.ndarray) -> GateResult:
         raise FileNotFoundError(f"no such session: {session_id}")
 
     config = load_app_config()
-    prepared = prepare(image, load_calibration())
+    prepared = prepare(image, load_calibration(), upright)
     analysis = analyse(prepared)
     mask, keypoints = analysis.mask, analysis.keypoints
 

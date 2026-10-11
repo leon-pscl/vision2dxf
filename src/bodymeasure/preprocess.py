@@ -52,15 +52,21 @@ def undistort(image: np.ndarray, calibration: Calibration) -> np.ndarray:
     )
 
 
-def prepare(image: np.ndarray, calibration: Calibration | None) -> np.ndarray:
+def prepare(
+    image: np.ndarray, calibration: Calibration | None, upright: bool = False
+) -> np.ndarray:
     """Rotate, then undistort if the station has a lens model.
+
+    ``upright`` says the frame is already in final orientation and must not be
+    turned: the station's camera is mounted portrait, so its live frames arrive
+    sideways, but a photograph off the camera roll or off disk is the right way up.
 
     Rotation comes from the calibration file when there is one and from
     ``config/app.yaml`` otherwise, so an uncorrected station still gets portrait
     frames the pose gate can use.
     """
     config = load_app_config()
-    degrees = calibration.rotation if calibration else config.camera.rotation
+    degrees = 0 if upright else (calibration.rotation if calibration else config.camera.rotation)
     rotated = rotate(image, degrees)
     if calibration and calibration.has_lens_model:
         return undistort(rotated, calibration)

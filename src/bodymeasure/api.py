@@ -137,11 +137,19 @@ async def create_session_route(
 
 @app.post("/api/sessions/{session_id}/views/{view}")
 async def capture_view(
-    session_id: str, view: str, image: Annotated[UploadFile, File()]
+    session_id: str,
+    view: str,
+    image: Annotated[UploadFile, File()],
+    upright: Annotated[bool, Form()] = False,
 ) -> dict[str, object]:
-    """Store one captured view and return the pose gate result."""
+    """Store one captured view and return the pose gate result.
+
+    ``upright`` marks a frame that is already the right way up. A live capture
+    comes from a camera mounted portrait and arrives sideways; an upload or a
+    stored sample is a photograph and must not be turned again.
+    """
     try:
-        result = save_view(session_id, view, decode_image(await image.read()))
+        result = save_view(session_id, view, decode_image(await image.read()), upright)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

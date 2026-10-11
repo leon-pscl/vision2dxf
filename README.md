@@ -10,6 +10,35 @@ pages, and the bench against the five GarmentCode reference bodies. The image
 scale is the subject's measured height, so there is no station calibration and no
 floor mark. Measured accuracy and its limits: [bench/README.md](bench/README.md).
 
+## Tech stack
+
+Deliberately boring: the whole pipeline is CPU-only Python behind one web server,
+and the front end has no build step at all.
+
+| Layer | What | Version / notes |
+|---|---|---|
+| Language | Python | 3.11 (pinned; the torch/ultralytics wheels target it) |
+| Web server | FastAPI + Uvicorn | `0.115.6` / `0.34.0`; JSON API plus the static pages |
+| Data validation | Pydantic | `2.10.4`, for `config/*.yaml` only |
+| Config & output | PyYAML | `6.0.2`; app config, schema, and both exported files |
+| Numerics | NumPy | `2.x`; opencv-python 5 requires numpy 2 |
+| Vision | OpenCV | `>=4.10,<6`; **not** `-headless`, because ultralytics imports `cv2` |
+| Detection & pose | Ultralytics YOLO26 | `>=8.4.52,<8.5`; `yolo26s-seg.pt` + `yolo26s-pose.pt`, CPU |
+| Uploads | python-multipart | `0.0.20`, required by FastAPI for the image endpoints |
+| Storage | SQLite | stdlib `sqlite3`; index, consent and audit trail only, no ORM |
+| Front end | HTML, CSS, vanilla JS | no framework, no bundler, no npm; `<canvas>` overlays |
+| Tests | pytest + FastAPI TestClient | drawn silhouettes with known answers in `tests/synthetic/` |
+| Lint & format | ruff | `0.8.6`; `ruff check` + `pytest` in `scripts/check.sh` |
+| Bench only | trimesh, plus `pygarment` from the GarmentCode clone | `requirements-bench.txt`; the PyPI wheel is unusable, see below |
+| Packaging | Docker (`python:3.11-slim`) or conda | `environment.yml` pins the same requirements |
+
+Everything runs offline: no cloud APIs, no telemetry, no network calls at
+runtime. `pygarment` is imported from a `git clone` of
+[GarmentCode](https://github.com/maria-korosteleva/GarmentCode) rather than PyPI,
+because the published wheel installs under different top-level names, does not
+ship the `BodyParameters` subclass, and pins a numpy older than opencv-python 5
+accepts.
+
 ## Run it (Docker — nothing else to install)
 
 ```bash
@@ -116,6 +145,7 @@ pixel.
 | `src/bodymeasure/` | `api.py`, `session.py`, `landmarks.py`, `measure.py`, `geometry.py`, and the rest |
 | `tools/` | the optional on-monitor lens calibration, a separate milestone |
 | `web/` | plain HTML/CSS/JS, no build step |
+| `web/samples/` | three stored captures the capture page offers as mock input |
 | `tests/` | pytest; `synthetic/` holds generated silhouettes with known answers |
 | `data/` | sessions and the index — git-ignored, never committed |
 
@@ -141,6 +171,27 @@ Open `/` and work down the page.
 
 Without a webcam, every step also accepts an uploaded image, so the demo runs
 away from the station.
+
+### Stored samples
+
+`web/samples/front.jpg`, `side_left.jpg` and `side_right.jpg` are three captured
+views the page offers as *Use sample*, so the whole flow can be demonstrated with
+no camera, no subject and no floor. They are committed files, dropped in by hand;
+nothing reads them unless the button is pressed.
+
+- **Replace them freely.** Drop in real photographs under the same three names
+  and the buttons pick them up — the page checks for each file and only shows the
+  button when it is there, so there is no list to keep in step.
+- **What makes a sample usable:** the three views must be the right way up, and
+  they have to pass the pose gate (8% clear top and bottom, body filling at
+  least 70% of the frame, centred, A-pose with the arms 20-45° out). A sample
+  that fails shows the reasons, exactly as a real capture does.
+- The committed ones are renders of the GarmentCode reference body, not
+  photographs of anyone, so the repository carries no image of a real person.
+
+Uploads and samples are sent as already upright. The station's camera is mounted
+portrait, so a *live* capture arrives sideways and the server turns it; turning a
+photograph a second time would lay the subject down.
 
 ## Capturing from another machine
 

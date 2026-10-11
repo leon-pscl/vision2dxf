@@ -152,6 +152,21 @@ def test_capturing_a_view_returns_the_gate_verdict(station: dict[str, object]) -
     assert body["views"] == ["front"]
 
 
+def test_an_upright_upload_is_not_turned_again(station: dict[str, object]) -> None:
+    """The live camera is mounted portrait; a photograph off disk already is not.
+
+    The station fixture rotates nothing, so the flag is checked against the
+    configured rotation the app would otherwise apply.
+    """
+    session_id = _open_session()
+    file = ("image", ("front.jpg", _png(_photo(station["front"].mask)), "image/png"))
+    response = client.post(
+        f"/api/sessions/{session_id}/views/front", files=[file], data={"upright": "true"}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["ok"] is True, response.json()["reasons"]
+
+
 def test_capturing_into_a_missing_session_is_a_404(station: dict[str, object]) -> None:
     file = ("image", ("front.png", _png(_photo(station["front"].mask)), "image/png"))
     unknown = uuid.uuid4().hex

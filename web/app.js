@@ -155,11 +155,14 @@ function initCapture() {
     el("measure").disabled = !(passed.has("front") && (passed.has("side_left") || passed.has("side_right")));
   }
 
-  async function sendView(view, blob) {
+  async function sendView(view, blob, upright) {
     const item = row(view);
     const output = item.querySelector("output");
     const data = new FormData();
     data.append("image", blob, `${view}.jpg`);
+    // A live capture arrives from a portrait-mounted camera and has to be turned;
+    // an upload or a stored sample is a photograph and must not be.
+    data.append("upright", String(Boolean(upright)));
     const body = await post(`/api/sessions/${sessionId}/views/${view}`, data, output);
     if (!body) {
       item.querySelector('[data-action="retake"]').hidden = false;
@@ -177,6 +180,20 @@ function initCapture() {
       item.querySelector('[data-action="retake"]').hidden = false;
     }
     refreshButtons();
+  }
+
+  // A sample only appears when the file is actually there, so the page needs no
+  // list to keep in step with whatever is in web/samples/.
+  async function offerSamples() {
+    for (const item of page.querySelectorAll("li[data-view]")) {
+      const response = await fetch(`/samples/${item.dataset.view}.jpg`, { method: "HEAD" });
+      item.querySelector('[data-action="sample"]').hidden = !response.ok;
+    }
+  }
+
+  async function useSample(view) {
+    const blob = await (await fetch(`/samples/${view}.jpg`)).blob();
+    await sendView(view, blob, true);
   }
 
   el("start-session").addEventListener("click", async () => {
@@ -211,10 +228,11 @@ function initCapture() {
     const view = item.dataset.view;
     item.querySelector('[data-action="capture"]').addEventListener("click", async () => {
       await runCountdown(3);
-      await sendView(view, await rawFrame());
+      await sendView(view, await rawFrame(), false);
     });
+    item.querySelector('[data-action="sample"]').addEventListener("click", () => useSample(view));
     item.querySelector("input[type=file]").addEventListener("change", async (event) => {
-      if (event.target.files[0]) await sendView(view, event.target.files[0]);
+      if (event.target.files[0]) await sendView(view, event.target.files[0], true);
     });
     item.querySelector('[data-action="retake"]').addEventListener("click", () => {
       passed.delete(view);
@@ -237,6 +255,7 @@ function initCapture() {
   });
 
   refreshButtons();
+  offerSamples();
   drawPreview();
 }
 

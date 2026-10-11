@@ -7,6 +7,7 @@ cheap and catch exactly that.
 
 import re
 
+import cv2
 import pytest
 
 from bodymeasure.config import ROOT
@@ -72,6 +73,32 @@ def test_uploads_are_offered_wherever_the_camera_is(script: str) -> None:
     """The demo must work without the station (brief 6)."""
     page = (WEB / "index.html").read_text(encoding="utf-8")
     assert page.count('type="file"') == 3, "one upload per view"
+    assert page.count('data-action="sample"') == 3, "one sample per view"
+
+
+def test_each_view_offers_its_own_stored_sample(script: str) -> None:
+    """The button must appear only when the file is there, so the page keeps itself."""
+    assert "/samples/${item.dataset.view}.jpg" in script
+    assert 'method: "HEAD"' in script
+    assert '/samples/${view}.jpg' in script
+
+
+def test_a_live_capture_is_turned_but_an_upload_is_not(script: str) -> None:
+    """The camera is mounted portrait; a photograph off disk already is not."""
+    assert "sendView(view, await rawFrame(), false)" in script
+    assert "sendView(view, event.target.files[0], true)" in script
+    assert "sendView(view, blob, true)" in script
+
+
+def test_the_three_stored_samples_are_present_and_readable() -> None:
+    """Dropped in by hand, so pin that what is committed is still usable."""
+    samples = WEB / "samples"
+    for view in ("front", "side_left", "side_right"):
+        path = samples / f"{view}.jpg"
+        assert path.exists(), path
+        image = cv2.imread(str(path))
+        assert image is not None, f"{path} is not a readable image"
+        assert image.shape[0] > 200 and image.shape[1] > 200, f"{path} is too small"
 
 
 def test_the_preview_sends_the_unrotated_frame(script: str) -> None:
