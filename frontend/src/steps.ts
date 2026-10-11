@@ -1,5 +1,6 @@
 export const STEPS = [
   { id: 'upload', title: 'Upload YAML' },
+  { id: 'definitions', title: 'Field definitions' },
   { id: 'review', title: 'Review measurements' },
   { id: 'configure', title: 'Garment & ease' },
   { id: 'generate', title: 'Generate' },

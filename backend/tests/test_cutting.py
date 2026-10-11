@@ -44,8 +44,8 @@ def test_zero_distance_keeps_a_fold_edge_in_place():
 
 
 @pytest.mark.parametrize("join", ["miter", "bevel", "round"])
-def test_every_join_style_produces_a_closed_contour(join, basic_body):
-    result = draft(basic_body, Settings(cutting_join=join))
+def test_every_join_style_produces_a_closed_contour(join, basic_resolution):
+    result = draft(basic_resolution, Settings(cutting_join=join))
     for key, line in result.cutting.items():
         assert line.join == join
         assert len(line.contour) >= 3
@@ -92,8 +92,8 @@ def test_dart_cutting_contours_exist(basic_result):
     assert len(basic_result.cutting["front"].dart_contours) == 2
 
 
-def test_seam_allowance_override_is_applied(basic_body):
-    result = draft(basic_body, Settings(seam_allowances={"armscye": 25.0}))
+def test_seam_allowance_override_is_applied(basic_resolution):
+    result = draft(basic_resolution, Settings(seam_allowances={"armscye": 25.0}))
     front = next(p for p in result.document.panels if p.key == "front")
     assert front.edge_by_role("armscye").seam_allowance_mm == 25.0
 

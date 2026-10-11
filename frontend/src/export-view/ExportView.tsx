@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Button, Callout } from '../components/ui'
-import { api, RequestError } from '../api'
+import { api, RequestError, saveJson, type GenerationPayload } from '../api'
 import type { GenerateResponse, Settings } from '../types'
 
 const FILES = [
-  { path: '/api/patterns/export/bundle', name: 'pattern-bundle.zip', label: 'Everything (zip)', note: 'all seven files' },
+  { path: '/api/patterns/export/bundle', name: 'pattern-bundle.zip', label: 'Everything (zip)', note: 'all files' },
   { path: '/api/patterns/export/pdf', name: 'pattern-a0.pdf', label: 'pattern-a0.pdf', note: 'full scale, A0' },
   { path: '/api/patterns/export/dxf', name: 'pattern.dxf', label: 'pattern.dxf', note: 'full scale, mm' },
   { path: '/api/patterns/export/svg', name: 'pattern-preview.svg', label: 'pattern-preview.svg', note: 'same geometry as the exports' },
@@ -12,13 +12,11 @@ const FILES = [
 
 export function ExportView({
   result,
-  yaml,
-  filename,
+  input,
   settings,
 }: {
   result: GenerateResponse
-  yaml: string
-  filename: string
+  input: GenerationPayload
   settings: Settings
 }) {
   const [busy, setBusy] = useState<string | null>(null)
@@ -29,22 +27,12 @@ export function ExportView({
     setBusy(name)
     setError(null)
     try {
-      await api.download(path, name, { yamlText: yaml, filename, settings })
+      await api.download(path, name, input, settings)
     } catch (e) {
       setError(e instanceof RequestError ? e.message : 'Export failed')
     } finally {
       setBusy(null)
     }
-  }
-
-  const saveJson = (name: string, data: unknown) => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = name
-    link.click()
-    URL.revokeObjectURL(url)
   }
 
   return (

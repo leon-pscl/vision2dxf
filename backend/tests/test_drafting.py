@@ -8,8 +8,8 @@ import pytest
 
 from app.config import drafting_config
 from app.drafting.ease import Settings
-from app.drafting.measurements import parse_measurements
-from app.drafting.pipeline import draft
+from app.drafting.pipeline import SemanticsBlocked, draft
+from app.drafting.semantics import resolve
 
 GOLDEN = Path(__file__).parent / "golden"
 TOL = 1e-6
@@ -25,23 +25,23 @@ def _back(result):
 
 # -- ease --------------------------------------------------------------------
 
-def test_ease_presets_change_the_widths(basic_body):
-    loose = draft(basic_body, Settings(ease_preset="relaxed"))
-    tight = draft(basic_body, Settings(ease_preset="skin_thin"))
+def test_ease_presets_change_the_widths(basic_resolution):
+    loose = draft(basic_resolution, Settings(ease_preset="relaxed"))
+    tight = draft(basic_resolution, Settings(ease_preset="skin_thin"))
     assert loose.values["der.front_bust_half_width"] > tight.values["der.front_bust_half_width"]
     assert loose.values["der.front_bust_half_width"] - tight.values["der.front_bust_half_width"] == \
         pytest.approx((140.0 - 20.0) / 2)
 
 
-def test_explicit_ease_overrides_the_preset(basic_body):
-    result = draft(basic_body, Settings(ease_preset="fitted", bust_ease_mm=200.0))
+def test_explicit_ease_overrides_the_preset(basic_resolution):
+    result = draft(basic_resolution, Settings(ease_preset="fitted", bust_ease_mm=200.0))
     assert result.values["der.front_bust_half_width"] == pytest.approx(
         (858.0 + 200.0 - 390.0) / 2)
 
 
-def test_ease_does_not_move_the_vertical_levels(basic_body):
-    base = draft(basic_body, Settings(ease_preset="fitted")).values
-    loose = draft(basic_body, Settings(ease_preset="relaxed")).values
+def test_ease_does_not_move_the_vertical_levels(basic_resolution):
+    base = draft(basic_resolution, Settings(ease_preset="fitted")).values
+    loose = draft(basic_resolution, Settings(ease_preset="relaxed")).values
     for key in ("lm.front.underarm_y", "lm.front.shoulder_tip_y", "lm.front.waist_side_y"):
         assert base[key] == pytest.approx(loose[key])
 
@@ -114,17 +114,12 @@ def test_dart_is_inside_its_panel(basic_result):
     assert check.status == "pass"
 
 
-def test_no_dart_when_the_bust_projection_is_zero(basic_body):
-    text = yaml_for("body_measurements.yaml").replace("bust_points: 14.6", "bust_points: 0.0")
-    result = draft(parse_measurements(text), Settings())
+def test_no_dart_when_the_apex_spacing_is_zero(basic_source, default_confirmations):
+    resolution = resolve(basic_source.values_cm, default_confirmations, {"bust_points": 0.0})
+    result = draft(resolution, Settings())
     assert result.values["der.dart_intake"] == pytest.approx(0.0)
     assert _front(result).darts == []
     assert result.report.status == "pass"
-
-
-def yaml_for(name: str) -> str:
-    from conftest import FIXTURES
-    return (FIXTURES / name).read_text(encoding="utf-8")
 
 
 # -- seams -------------------------------------------------------------------
@@ -157,33 +152,36 @@ def test_stitches_reference_existing_edges(basic_result):
             assert basic_result.document.edge_by_id(rec.edge_id) is not None
 
 
-# -- both fixtures and determinism -------------------------------------------
+# -- semantics reach the geometry --------------------------------------------
 
-@pytest.mark.parametrize("key", ["basic_result", "pascual_result"])
-def test_both_profiles_pass_critical_validation(key, request):
-    result = request.getfixturevalue(key)
-    assert result.report.status == "pass", [c.message for c in result.report.checks if c.status == "fail"]
-
-
-def test_repeated_runs_are_geometrically_identical(basic_body):
-    first = draft(basic_body, Settings())
-    second = draft(basic_body, Settings())
-    for a, b in zip(first.document.panels, second.document.panels):
-        assert a.ensure_id() == b.ensure_id()
-        for ea, eb in zip(a.edges, b.edges):
-            assert ea.ensure_id() == eb.ensure_id()
-            assert ea.start == eb.start and ea.end == eb.end
-            assert ea.length_mm == pytest.approx(eb.length_mm, abs=TOL)
+def test_changing_an_interpretation_changes_the_pattern(basic_source, default_confirmations):
+    """A confirmed representation must actually drive the draft, not just the report."""
+    half = draft(resolve(basic_source.values_cm, default_confirmations), Settings())
+    full = draft(resolve(basic_source.values_cm,
+                         {**default_confirmations, "shoulder_w": "full_across_shoulder_tips"}),
+                 Settings())
+    assert half.values["der.shoulder_half_width"] == pytest.approx(171.0)
+    assert full.values["der.shoulder_half_width"] == pytest.approx(85.5)
 
 
-def test_measurements_drive_the_geometry(basic_body, pascual_body):
-    small = draft(basic_body, Settings())
-    large = draft(pascual_body, Settings())
-    assert large.values["der.front_bust_half_width"] > small.values["der.front_bust_half_width"]
-    assert large.document.panels[0].bbox()[2] > small.document.panels[0].bbox()[2]
+def test_measurements_drive_the_geometry(basic_source, basic_resolution, default_confirmations):
+    small = draft(basic_resolution, Settings())
+    wide = draft(resolve(basic_source.values_cm,
+                         {**default_confirmations, "back_width": "centre_back_to_side_seam"}),
+                 Settings())
+    # a different confirmed representation of the same source value moves the side seam
+    assert wide.values["der.front_bust_half_width"] < small.values["der.front_bust_half_width"]
 
 
-def test_no_master_pattern_is_loaded(basic_result, monkeypatch):
+def test_a_profile_outside_the_schema_ranges_never_reaches_the_draft(pascual_source,
+                                                                    default_confirmations):
+    resolution = resolve(pascual_source.values_cm, default_confirmations)
+    assert not resolution.can_generate
+    with pytest.raises(SemanticsBlocked):
+        draft(resolution, Settings())
+
+
+def test_no_master_pattern_is_loaded(basic_source, default_confirmations, monkeypatch):
     """The draft may not read the reference fixture."""
     opened: list[str] = []
     real_open = open
@@ -193,8 +191,25 @@ def test_no_master_pattern_is_loaded(basic_result, monkeypatch):
         return real_open(path, *args, **kwargs)
 
     monkeypatch.setattr("builtins.open", spy)
-    draft(parse_measurements(yaml_for("body_measurements.yaml")), Settings())
+    draft(resolve(basic_source.values_cm, default_confirmations), Settings())
     assert not any("garmageset" in p for p in opened)
+
+
+def test_repeated_runs_are_geometrically_identical(basic_resolution):
+    first = draft(basic_resolution, Settings())
+    second = draft(basic_resolution, Settings())
+    for a, b in zip(first.document.panels, second.document.panels):
+        assert a.ensure_id() == b.ensure_id()
+        for ea, eb in zip(a.edges, b.edges):
+            assert ea.ensure_id() == eb.ensure_id()
+            assert ea.start == eb.start and ea.end == eb.end
+            assert ea.length_mm == pytest.approx(eb.length_mm, abs=TOL)
+
+
+def test_repeated_runs_over_the_file_are_identical(basic_source, default_confirmations):
+    a = draft(resolve(basic_source.values_cm, default_confirmations), Settings())
+    b = draft(resolve(basic_source.values_cm, default_confirmations), Settings())
+    assert json.dumps(_snapshot(a)) == json.dumps(_snapshot(b))
 
 
 # -- golden files ------------------------------------------------------------
@@ -234,9 +249,26 @@ def _compare(actual, expected, path=""):
         assert actual == expected, path
 
 
-@pytest.mark.parametrize("fixture,golden", [("basic_result", "basic_bodice.json"),
-                                            ("pascual_result", "pascual_bodice.json")])
-def test_golden_snapshot(fixture, golden, request):
-    result = request.getfixturevalue(fixture)
-    expected = json.loads((GOLDEN / golden).read_text(encoding="utf-8"))
-    _compare(_snapshot(result), expected)
+def test_golden_snapshot(basic_result):
+    expected = json.loads((GOLDEN / "basic_bodice.json").read_text(encoding="utf-8"))
+    _compare(_snapshot(basic_result), expected)
+
+
+def test_golden_derived_values(basic_result):
+    expected = json.loads((GOLDEN / "basic_bodice.json").read_text(encoding="utf-8"))["values"]
+    assert {k: round(v, 6) for k, v in basic_result.values.items() if k.startswith("der.")} == expected
+
+
+def test_golden_semantics_for_both_profiles(basic_resolution, pascual_resolution):
+    """Golden record of the semantics decision for each supplied profile."""
+    expected = json.loads((GOLDEN / "semantics_resolution.json").read_text(encoding="utf-8"))
+    for key, resolution in (("basic", basic_resolution), ("pascual", pascual_resolution)):
+        assert resolution.schema_version == expected[key]["schemaVersion"]
+        assert resolution.can_generate == expected[key]["canGenerate"]
+        assert {f.name: f.status for f in resolution.fields.values()} == expected[key]["statuses"]
+        assert [(b["field"], b["code"]) for b in resolution.blocking] == \
+            [tuple(b) for b in expected[key]["blocking"]]
+        if resolution.measurements:
+            assert resolution.measurements.model_dump() == expected[key]["draftingMeasurements"]
+        else:
+            assert expected[key]["draftingMeasurements"] is None

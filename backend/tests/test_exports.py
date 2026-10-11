@@ -89,14 +89,20 @@ def test_preview_png_is_a_png(basic_result):
     assert data[:8] == b"\x89PNG\r\n\x1a\n"
 
 
-def test_bundle_contains_every_required_file(basic_body):
+def test_bundle_contains_every_required_file(basic_source, default_confirmations):
+    import json
+
     from app.api.routes import export_bundle
     from app.schemas.api import ExportRequest, SettingsPayload
     from conftest import yaml_text
 
-    response = export_bundle(ExportRequest(yamlText=yaml_text("body_measurements.yaml"),
-                                           settings=SettingsPayload()))
+    payload = dict(yamlText=yaml_text("body_measurements.yaml"),
+                   confirmations=default_confirmations,
+                   settings=SettingsPayload())
+    response = export_bundle(ExportRequest(**payload))
     with zipfile.ZipFile(io.BytesIO(response.body)) as zf:
         names = set(zf.namelist())
         assert {"pattern.json", "generation-manifest.json", "validation-report.json",
-                "pattern-preview.png", "pattern-a0.pdf", "pattern.dxf"} <= names
+                "pattern-preview.png", "pattern-a0.pdf", "pattern.dxf",
+                "pattern-preview.svg"} <= names
+        assert json.loads(zf.read("validation-report.json"))["status"] == "pass"

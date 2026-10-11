@@ -1,5 +1,6 @@
-"""Config loading. Drafting constants and the measurement dictionary ship as YAML so
-no unexplained constant lives inside a geometry function."""
+"""Config loading. Drafting constants, the measurement dictionary and the measurement
+semantics registry ship as YAML so no unexplained constant lives inside a geometry
+function and no field meaning is inferred from its name."""
 from __future__ import annotations
 
 from functools import lru_cache
@@ -22,6 +23,11 @@ def drafting_config() -> dict:
 
 def measurement_dictionary() -> dict:
     return _load("measurements.yaml")
+
+
+def semantics_config() -> dict:
+    """Schema configuration for the camera measurement subsystem."""
+    return _load("measurement-semantics.yaml")
 
 
 def measurement_index() -> dict[str, dict]:

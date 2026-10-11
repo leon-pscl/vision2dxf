@@ -64,12 +64,27 @@ export type RuleTrace = {
 
 export type Manifest = {
   method: string
-  ruleRegistryVersion: string
-  sourceFile: string
-  units: { input: string; geometry: string }
+  measurement_schema_version: string
+  definition_version: string
+  software_version: string
+  generated_at: string
+  rule_registry_version: string
+  source_file: string
+  units: { source: string; pattern: string }
+  coordinate_convention: { vertical_origin: string; vertical_direction: string; pattern_frame_y_zero: string }
+  field_interpretations: Record<string, {
+    meaning: string
+    status: string
+    confirmed_by: string
+    candidate: string | null
+  }>
+  field_records: unknown[]
+  derived_measurements: Record<string, { value: number | null; equation: string }>
+  drafting_measurements_mm: Record<string, number | null>
+  assumptions: Warning[]
+  warnings: Warning[]
   settings: Settings
   ease: { preset: string; bustMm: number; waistMm: number; hipMm: number }
-  assumptions: Warning[]
   tolerances: Record<string, number>
   fixtureDefaults: Record<string, unknown>
   rules: RuleTrace[]

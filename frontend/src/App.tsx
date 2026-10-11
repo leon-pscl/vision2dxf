@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api, RequestError } from './api'
+import { api, RequestError, type GenerationPayload } from './api'
 import { Stepper } from './components/Stepper'
 import { Button, Callout, Spinner } from './components/ui'
 import { UploadStep } from './upload/UploadStep'
+import { DefinitionsStep } from './semantics/DefinitionsStep'
 import { MeasurementReview } from './measurement-review/MeasurementReview'
 import { ConfigureStep } from './configure/ConfigureStep'
 import { GenerationStep } from './generate/GenerationStep'
 import { PatternViewer } from './pattern-viewer/PatternViewer'
 import { ValidationView } from './validation-view/ValidationView'
 import { ExportView } from './export-view/ExportView'
-import { STEPS, firstIncompleteStep, type StepId } from './steps'
+import { STEPS, firstIncompleteStep, stepIndex, type StepId } from './steps'
 import type { AppConfig, GenerateResponse, Review, Settings } from './types'
 
 const DEFAULT_SETTINGS: Settings = {
@@ -29,11 +30,18 @@ const DEFAULT_SETTINGS: Settings = {
   unit: 'cm',
 }
 
+const EMPTY_PAYLOAD: GenerationPayload = {
+  yamlText: '',
+  filename: 'body_measurements.yaml',
+  confirmations: {},
+  corrections: {},
+}
+
 export default function App() {
   const [step, setStep] = useState(0)
-  const [yaml, setYaml] = useState('')
-  const [filename, setFilename] = useState('body_measurements.yaml')
+  const [input, setInput] = useState<GenerationPayload>(EMPTY_PAYLOAD)
   const [review, setReview] = useState<Review | null>(null)
+  const [semanticsReady, setSemanticsReady] = useState(false)
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [result, setResult] = useState<GenerateResponse | null>(null)
   const [config, setConfig] = useState<AppConfig | null>(null)
@@ -56,27 +64,29 @@ export default function App() {
     setBusy(true)
     setError(null)
     try {
-      setResult(await api.generate(yaml, filename, settings))
-      setStep(STEPS.findIndex((s) => s.id === 'inspect'))
+      setResult(await api.generate(input, settings))
+      setStep(stepIndex('inspect'))
     } catch (e) {
-      setError(e instanceof RequestError ? `${e.message} ${e.details.map((d) => d.field).join(', ')}` : 'Generation failed')
+      setError(e instanceof RequestError ? e.message : 'Generation failed')
+      setStep(stepIndex('definitions'))
     } finally {
       setBusy(false)
     }
-  }, [yaml, filename, settings])
+  }, [input, settings])
 
   const ready = useMemo(
     () =>
       ({
-        upload: yaml.trim().length > 0,
-        review: Boolean(review),
-        configure: Boolean(review),
-        generate: Boolean(review),
+        upload: input.yamlText.trim().length > 0,
+        definitions: semanticsReady,
+        review: semanticsReady,
+        configure: semanticsReady,
+        generate: semanticsReady,
         inspect: Boolean(result),
         validation: Boolean(result),
         export: Boolean(result),
       }) as Record<StepId, boolean>,
-    [yaml, review, result],
+    [input, semanticsReady, result],
   )
 
   const furthest = firstIncompleteStep(ready)
@@ -114,24 +124,42 @@ export default function App() {
 
         {step === 0 ? (
           <UploadStep
-            yaml={yaml}
-            filename={filename}
-            setYaml={setYaml}
-            setFilename={setFilename}
+            yaml={input.yamlText}
+            filename={input.filename}
+            setYaml={(yamlText) => setInput({ ...EMPTY_PAYLOAD, yamlText, filename: input.filename })}
+            setFilename={(filename) => setInput({ ...EMPTY_PAYLOAD, filename, yamlText: input.yamlText })}
             onUploaded={(r) => {
               setReview(r)
-              setStep(1)
+              setSemanticsReady(false)
+              setStep(stepIndex('definitions'))
             }}
           />
         ) : null}
 
-        {step === 1 && review ? (
-          <MeasurementReview review={review} />
-        ) : (
-          step === 1 ? <p>Import a YAML file first.</p> : null
-        )}
+        {step === 1 ? (
+          <DefinitionsStep
+            input={input}
+            onChange={(next) => {
+              setInput(next)
+              setResult(null)
+              setSemanticsReady(false)
+            }}
+            onBack={() => setStep(0)}
+            onReady={() => setSemanticsReady(true)}
+          />
+        ) : null}
 
         {step === 2 && review ? (
+          <MeasurementReview
+            review={review}
+            confirmations={input.confirmations}
+            onCorrections={(corrections) => setInput({ ...input, corrections })}
+          />
+        ) : (
+          step === 2 ? <p>Import a YAML file first.</p> : null
+        )}
+
+        {step === 3 ? (
           <ConfigureStep
             settings={settings}
             onChange={setSettings}
@@ -140,24 +168,30 @@ export default function App() {
           />
         ) : null}
 
-        {step === 3 ? (
+        {step === 4 ? (
           <div className="stack">
             <h2>Generate the pattern</h2>
             <p className="muted">
               Drafting runs the rule registry end to end and validates the geometry before anything is shown.
+              Confirmations from the definitions screen travel with the request.
             </p>
-            <Button variant="primary" onClick={() => void generate()} disabled={busy}>
+            <Button variant="primary" onClick={() => void generate()} disabled={busy || !semanticsReady}>
               {busy ? 'Drafting…' : result ? 'Regenerate pattern' : 'Generate pattern'}
             </Button>
+            {!semanticsReady ? (
+              <Callout tone="warn">
+                Every required field needs a confirmed definition before generation is allowed.
+              </Callout>
+            ) : null}
             {busy ? <Spinner label="Drafting panels, running geometry checks…" /> : null}
             {result ? <GenerationStep result={result} /> : null}
           </div>
         ) : null}
 
-        {step === 4 && result ? <PatternViewer preview={result.preview} /> : null}
-        {step === 5 && result ? <ValidationView report={result.validation} /> : null}
-        {step === 6 && result ? (
-          <ExportView result={result} yaml={yaml} filename={filename} settings={settings} />
+        {step === 5 && result ? <PatternViewer preview={result.preview} /> : null}
+        {step === 6 && result ? <ValidationView report={result.validation} /> : null}
+        {step === 7 && result ? (
+          <ExportView result={result} input={input} settings={settings} />
         ) : null}
       </main>
 
@@ -175,7 +209,7 @@ export default function App() {
           </Button>
         </div>
         <small className="muted">
-          Geometry in millimetres · tolerance for endpoint continuity 0.1 mm · no master pattern is loaded
+          Geometry in millimetres · endpoint tolerance 0.1 mm · no master pattern is loaded
         </small>
       </footer>
     </div>

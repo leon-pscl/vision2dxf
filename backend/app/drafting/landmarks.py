@@ -42,7 +42,7 @@ def build_landmark_rules(constants: dict) -> list[DraftingRule]:
         lm(f"lm.{s}.cf_neck_x", lambda v: 0.0, f"Centre {s} neck point sits on the centre line.")
         lm(f"lm.{s}.cf_neck_y", lambda v: 0.0, f"Centre {s} neck point is the frame origin.")
         lm(f"lm.{s}.cf_waist_x", lambda v: 0.0, f"Centre {s} waist point sits on the centre line.")
-        lm(f"lm.{s}.cf_waist_y", lambda v: v["waist_level"], f"Centre {s} waist point is on the waist line.")
+        lm(f"lm.{s}.cf_waist_y", lambda v: v["neck_to_waist_level"], f"Centre {s} waist point is on the waist line.")
 
         lm(f"lm.{s}.neck_shoulder_x", lambda v: v["der.neck_shoulder_x"],
            "Neck-shoulder point x = neck_w * constants.neck_shoulder_share.")
@@ -63,7 +63,7 @@ def build_landmark_rules(constants: dict) -> list[DraftingRule]:
            "Underarm y = shoulder tip y + armscye depth.")
         lm(f"lm.{s}.waist_side_x", lambda v, b=waist_half: v[b],
            f"Side seam at the waist = the {s} half-pattern width at the waist line.")
-        lm(f"lm.{s}.waist_side_y", lambda v: v["waist_level"],
+        lm(f"lm.{s}.waist_side_y", lambda v: v["neck_to_waist_level"],
            "Side seam at the waist is on the waist line.")
 
         lm(f"lm.{s}.neck_dip_x", lambda v, d=dip_x: v[d],
@@ -120,9 +120,9 @@ def build_landmark_rules(constants: dict) -> list[DraftingRule]:
            "Neckline control 2 y.")
 
     # ---- front bust shaping / dart ----------------------------------------
-    lm("lm.front.dart_top_y", lambda v: v["bust_level"] + c["dart_top_offset_mm"],
+    lm("lm.front.dart_top_y", lambda v: v["neck_to_bust_level"] + c["dart_top_offset_mm"],
        "Upper dart leg sits on the bust line plus constants.dart_top_offset_mm.")
-    lm("lm.front.dart_bottom_y", lambda v: v["waist_level"],
+    lm("lm.front.dart_bottom_y", lambda v: v["neck_to_waist_level"],
        "Lower dart leg sits on the waist line.")
     lm("lm.front.bust_apex_y",
        lambda v: min(max(v["der.bust_apex_y"], v["lm.front.dart_top_y"] + c["dart_min_height_mm"]),

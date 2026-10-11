@@ -105,7 +105,7 @@ def build_panel(
         (cf_neck, cf_waist),
         (cf_neck, Point2D(snp.x, cf_neck.y)),
         (snp, Point2D(st.x + 40.0, st.y)),
-        (Point2D(0.0, v["bust_level"]), Point2D(v["der.front_bust_half_width"], v["bust_level"])),
+        (Point2D(0.0, v["neck_to_bust_level"]), Point2D(v["der.front_bust_half_width"], v["neck_to_bust_level"])),
         (cf_waist, ws),
     ]
 

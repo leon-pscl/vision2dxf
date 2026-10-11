@@ -1,0 +1,648 @@
+# Measurement Semantics Registry
+#
+# SCHEMA CONFIGURATION - maintained by developers/researchers of the camera
+# measurement subsystem, NOT by an operator during a generation session.
+#
+# It pins down what every field of body_measurements.yaml means: quantity type,
+# anatomical landmarks, measurement direction, origin and full/half representation.
+# An operator may confirm an offered definition and correct a numeric value, but may
+# not invent or redefine meaning here. Two uploads of identically structured YAML are
+# therefore interpreted identically, or the schema_version says why not.
+#
+# Every value a drafting equation consumes must reach it through the DraftingMeasurements
+# adapter (app/drafting/semantics.py). Drafting code must never read a source field name.
+#
+# field status vocabulary:
+#   confirmed  the definition below is authoritative; drafting may use it directly
+#   ambiguous  candidates are offered but none is authoritative; an operator must
+#              confirm the chosen candidate before generation is allowed
+#   optional   the field is not needed by the selected garment; absence is not an error
+
+schema_version: "1.0"
+definition_version: "2026.10"
+
+coordinate_system:
+  # Declared by the camera subsystem for the vertical fields of this schema.
+  vertical_origin: neck_reference_point
+  vertical_direction: downward
+  unit: cm
+  pattern_unit: mm
+  # Vertical fields are absolute levels when `origin` is set, and landmark-to-landmark
+  # distances when start_landmark/end_landmark are set instead. Two fields may only be
+  # subtracted when their origins agree; a mismatch is a blocking schema error.
+  pattern_frame:
+    y_zero_landmark: neck_reference_point
+    y_zero_offset_source_mm: 0.0
+  angles:
+    default_unit: degrees
+    sign_convention: positive_is_downward_from_horizontal
+
+categories:
+  circumference:
+    required_metadata: [anatomical_level, representation]
+  width:
+    required_metadata: [start_landmark, end_landmark, scope, representation]
+  direct_length:
+    required_metadata: [start_landmark, end_landmark]
+  vertical_level:
+    required_metadata: [origin, axis]
+  relative_vertical_distance:
+    required_metadata: [start_landmark, end_landmark, axis]
+  landmark_spacing:
+    required_metadata: [start_landmark, end_landmark, representation]
+  angle:
+    required_metadata: [reference_axis, sign_convention, unit]
+
+fields:
+
+  # ---- circumferences: names and units are unambiguous, pinned here -------------
+  bust:
+    label: Bust
+    category: circumference
+    quantity_type: circumference
+    anatomical_level: maximum_bust
+    representation: full
+    required: true
+    status: confirmed
+    drafting_variable: bust_circumference
+    unit: cm
+    range: [40.0, 200.0]
+    definition: >-
+      Total bust girth taken at the fullest level of the chest, in centimetres.
+
+  waist:
+    label: Waist
+    category: circumference
+    quantity_type: circumference
+    anatomical_level: natural_waist
+    representation: full
+    required: true
+    status: confirmed
+    drafting_variable: waist_circumference
+    unit: cm
+    range: [35.0, 200.0]
+    definition: >-
+      Total girth at the natural waist, the narrowest level of the torso.
+
+  hips:
+    label: Hips
+    category: circumference
+    quantity_type: circumference
+    anatomical_level: maximum_hip
+    representation: full
+    required: false
+    status: confirmed
+    drafting_variable: hip_circumference
+    unit: cm
+    range: [40.0, 220.0]
+    definition: Total girth at the fullest point of the hip.
+
+  wrist:
+    label: Wrist
+    category: circumference
+    quantity_type: circumference
+    anatomical_level: wrist
+    representation: full
+    required: false
+    status: confirmed
+    drafting_variable: wrist_circumference
+    unit: cm
+    range: [8.0, 30.0]
+    definition: Total girth at the wrist.
+
+  leg_circ:
+    label: Leg girth
+    category: circumference
+    quantity_type: circumference
+    anatomical_level: mid_thigh
+    representation: full
+    required: false
+    status: confirmed
+    drafting_variable: leg_circumference
+    unit: cm
+    range: [20.0, 100.0]
+    definition: Total girth at mid thigh.
+
+  height:
+    label: Height
+    category: direct_length
+    quantity_type: stature
+    start_landmark: floor
+    end_landmark: crown
+    required: false
+    status: confirmed
+    drafting_variable: stature
+    unit: cm
+    range: [100.0, 230.0]
+    definition: Vertical stature from the floor to the crown of the head.
+
+  # ---- back widths: full across the back vs centre-back to side seam -----------
+  back_width:
+    label: Back width at the bust line
+    category: width
+    quantity_type: girth_portion
+    scope: back
+    required: true
+    status: ambiguous
+    axis: lateral
+    unit: cm
+    range: [15.0, 130.0]
+    definition: >-
+      Width of the back portion of the body at the bust line. The two candidates differ
+      in what the tape follows; the drafting split of the bust girth depends on it.
+    candidates:
+      - id: across_back_side_to_side
+        meaning: Girth of the back half of the body at the bust line, from the left side
+          seam around the centre back to the right side seam.
+        representation: full
+        start_landmark: left_side_seam_bust
+        end_landmark: right_side_seam_bust
+        drafting_variable: back_width_full
+        scale: 1.0
+      - id: centre_back_to_side_seam
+        meaning: Half of the back at the bust line, from the centre back to one side seam.
+        representation: half
+        start_landmark: centre_back_bust
+        end_landmark: side_seam_bust
+        drafting_variable: back_width_full
+        scale: 2.0
+
+  waist_back_width:
+    label: Back width at the waist line
+    category: width
+    quantity_type: girth_portion
+    scope: back
+    required: true
+    status: ambiguous
+    axis: lateral
+    unit: cm
+    range: [15.0, 130.0]
+    definition: Width of the back portion of the body at the waist line.
+    candidates:
+      - id: across_back_side_to_side
+        meaning: Girth of the back half of the body at the waist line, side seam to side seam.
+        representation: full
+        start_landmark: left_side_seam_waist
+        end_landmark: right_side_seam_waist
+        drafting_variable: waist_back_width_full
+        scale: 1.0
+      - id: centre_back_to_side_seam
+        meaning: Half of the back at the waist line, centre back to one side seam.
+        representation: half
+        start_landmark: centre_back_waist
+        end_landmark: side_seam_waist
+        drafting_variable: waist_back_width_full
+        scale: 2.0
+
+  hip_back_width:
+    label: Back width at the hip line
+    category: width
+    quantity_type: girth_portion
+    scope: back
+    required: false
+    status: optional
+    axis: lateral
+    unit: cm
+    range: [15.0, 140.0]
+    definition: Width of the back portion of the body at the hip line.
+    candidates:
+      - id: across_back_side_to_side
+        meaning: Girth of the back half of the body at the hip line, side seam to side seam.
+        representation: full
+        start_landmark: left_side_seam_hip
+        end_landmark: right_side_seam_hip
+        drafting_variable: hip_back_width_full
+        scale: 1.0
+      - id: centre_back_to_side_seam
+        meaning: Half of the back at the hip line, centre back to one side seam.
+        representation: half
+        start_landmark: centre_back_hip
+        end_landmark: side_seam_hip
+        drafting_variable: hip_back_width_full
+        scale: 2.0
+
+  # ---- neck and shoulder -----------------------------------------------------
+  neck_w:
+    label: Neck width
+    category: width
+    quantity_type: girth_portion
+    scope: neck
+    required: true
+    status: ambiguous
+    axis: lateral
+    unit: cm
+    range: [8.0, 60.0]
+    definition: >-
+      Neck width. The candidates disagree on whether the scan reports half or the full
+      neck girth, which halves or doubles every neckline dimension.
+    candidates:
+      - id: half_neck_girth
+        meaning: Half of the neck girth, i.e. the target neckline seam length.
+        representation: half
+        start_landmark: centre_front_neck
+        end_landmark: centre_back_neck
+        drafting_variable: neck_width_half
+        scale: 1.0
+      - id: full_neck_girth
+        meaning: The complete neck girth; the drafting engine takes half of it.
+        representation: full
+        start_landmark: centre_front_neck
+        end_landmark: centre_back_neck
+        drafting_variable: neck_width_half
+        scale: 0.5
+
+  shoulder_w:
+    label: Shoulder width
+    category: width
+    quantity_type: width
+    scope: upper_body
+    required: true
+    status: ambiguous
+    axis: lateral
+    unit: cm
+    range: [8.0, 60.0]
+    definition: >-
+      Shoulder width. The samples (17.1 cm and 35.1 cm) are consistent with either a half
+      shoulder or a full one, so the representation must be confirmed before drafting.
+    candidates:
+      - id: half_neck_to_shoulder_tip
+        meaning: From the neck reference point to one shoulder tip.
+        representation: half
+        start_landmark: neck_reference_point
+        end_landmark: shoulder_tip
+        drafting_variable: shoulder_width_full
+        scale: 2.0
+      - id: full_across_shoulder_tips
+        meaning: From the left shoulder tip across to the right shoulder tip.
+        representation: full
+        start_landmark: left_shoulder_tip
+        end_landmark: right_shoulder_tip
+        drafting_variable: shoulder_width_full
+        scale: 1.0
+
+  shoulder_incl:
+    label: Shoulder inclination
+    category: angle
+    quantity_type: angle
+    required: true
+    status: ambiguous
+    unit: deg
+    range: [0.0, 90.0]
+    definition: >-
+      Shoulder inclination. The reference axis is not stated by the source field name,
+      and the two candidate conventions differ by 90 degrees.
+    candidates:
+      - id: below_horizontal
+        meaning: Shoulder slope measured downward from the horizontal.
+        reference_axis: horizontal
+        sign_convention: positive_is_downward
+        drafting_variable: shoulder_slope_degrees
+        scale: 1.0
+      - id: from_vertical
+        meaning: Shoulder slope measured from the vertical, converted to degrees below horizontal.
+        reference_axis: vertical
+        sign_convention: positive_is_upward
+        transform: subtract_from_ninety
+        drafting_variable: shoulder_slope_degrees
+        scale: 1.0
+
+  # ---- vertical levels and distances -----------------------------------------
+  bust_line:
+    label: Bust line
+    category: vertical_level
+    quantity_type: vertical_level
+    origin: neck_reference_point
+    axis: vertical
+    required: true
+    status: ambiguous
+    unit: cm
+    range: [10.0, 60.0]
+    definition: >-
+      Absolute vertical level of the bust line. Its origin must be confirmed, because it
+      is subtracted against waist_line.
+    candidates:
+      - id: level_from_neck_reference_point
+        meaning: Vertical level of the bust line, measured down from the neck reference point.
+        origin: neck_reference_point
+        drafting_variable: neck_to_bust_level
+        scale: 1.0
+      - id: level_from_top_of_head
+        meaning: >-
+          Vertical level of the bust line measured down from the top of the head. Not
+          usable unless a neck reference level is also confirmed.
+        origin: top_of_head
+        drafting_variable: neck_to_bust_level
+        scale: 1.0
+
+  waist_line:
+    label: Waist line
+    category: vertical_level
+    quantity_type: vertical_level
+    origin: neck_reference_point
+    axis: vertical
+    required: true
+    status: ambiguous
+    unit: cm
+    range: [10.0, 70.0]
+    definition: Absolute vertical level of the natural waist line.
+    candidates:
+      - id: level_from_neck_reference_point
+        meaning: Vertical level of the waist line, measured down from the neck reference point.
+        origin: neck_reference_point
+        drafting_variable: neck_to_waist_level
+        scale: 1.0
+      - id: level_from_top_of_head
+        meaning: Vertical level of the waist line measured down from the top of the head.
+        origin: top_of_head
+        drafting_variable: neck_to_waist_level
+        scale: 1.0
+
+  waist_over_bust_line:
+    label: Over-bust line
+    category: vertical_level
+    quantity_type: vertical_level
+    origin: neck_reference_point
+    axis: vertical
+    required: false
+    status: optional
+    unit: cm
+    range: [10.0, 60.0]
+    definition: Vertical level of the measuring line that passes over the bust.
+    candidates:
+      - id: level_from_neck_reference_point
+        meaning: Vertical level of the over-bust line, measured down from the neck reference point.
+        origin: neck_reference_point
+        drafting_variable: neck_to_over_bust_level
+        scale: 1.0
+      - id: level_from_top_of_head
+        meaning: Vertical level of the over-bust line measured down from the top of the head.
+        origin: top_of_head
+        drafting_variable: neck_to_over_bust_level
+        scale: 1.0
+
+  vert_bust_line:
+    label: Vertical bust line
+    category: relative_vertical_distance
+    quantity_type: vertical_distance
+    required: true
+    status: ambiguous
+    unit: cm
+    range: [10.0, 70.0]
+    definition: >-
+      A vertical distance, not a level: the name is similar to bust_line but the
+      candidates disagree about which two landmarks it spans. It positions the bust apex.
+    candidates:
+      - id: neck_reference_point_to_bust_apex
+        meaning: Vertical distance from the neck reference point down to the bust apex.
+        start_landmark: neck_reference_point
+        end_landmark: bust_apex
+        axis: vertical
+        drafting_variable: neck_to_bust_apex_vertical
+        scale: 1.0
+      - id: bust_line_to_bust_apex
+        meaning: >-
+          Vertical distance from the bust line down to the bust apex. Normalized by adding
+          the confirmed bust level.
+        start_landmark: bust_line
+        end_landmark: bust_apex
+        axis: vertical
+        drafting_variable: neck_to_bust_apex_vertical
+        scale: 1.0
+        add_drafting_variable: neck_to_bust_level
+
+  armscye_depth:
+    label: Armscye depth
+    category: relative_vertical_distance
+    quantity_type: vertical_distance
+    required: true
+    status: ambiguous
+    unit: cm
+    range: [8.0, 40.0]
+    definition: >-
+      Vertical depth of the armhole. The reference level it starts from is not stated by
+      the source field name.
+    candidates:
+      - id: shoulder_tip_level_to_underarm
+        meaning: Vertical drop from the shoulder-tip level to the underarm point.
+        start_landmark: shoulder_tip_level
+        end_landmark: underarm_point
+        axis: vertical
+        drafting_variable: armscye_depth_vertical
+        scale: 1.0
+      - id: neck_reference_point_to_underarm
+        meaning: >-
+          Vertical drop from the neck reference point to the underarm point. Normalized by
+          subtracting the drafted shoulder-tip drop.
+        start_landmark: neck_reference_point
+        end_landmark: underarm_point
+        axis: vertical
+        drafting_variable: armscye_depth_vertical
+        scale: 1.0
+        subtract_drafting_variable: shoulder_tip_drop_below_neck_reference
+
+  # ---- landmark spacing ------------------------------------------------------
+  bust_points:
+    label: Bust spacing
+    category: landmark_spacing
+    quantity_type: linear_distance
+    required: true
+    status: ambiguous
+    unit: cm
+    range: [0.0, 40.0]
+    definition: >-
+      A distance related to the bust apex. It may be the projection off the chest wall or
+      a half-body representation of it, and it drives both the dart intake and the
+      horizontal position of the apex.
+    candidates:
+      - id: chest_wall_to_apex
+        meaning: Horizontal projection of the bust apex off the chest wall.
+        representation: direct
+        start_landmark: chest_wall_at_apex
+        end_landmark: bust_apex
+        drafting_variable: bust_apex_spacing_full
+        scale: 1.0
+      - id: half_projection
+        meaning: Half the projection off the chest wall, as a half-body representation.
+        representation: half
+        start_landmark: chest_wall_at_apex
+        end_landmark: bust_apex
+        drafting_variable: bust_apex_spacing_full
+        scale: 2.0
+
+  bum_points:
+    label: Buttock spacing
+    category: landmark_spacing
+    quantity_type: linear_distance
+    required: false
+    status: optional
+    unit: cm
+    range: [0.0, 40.0]
+    definition: Buttock projection off the lower back; outside the bodice scope.
+    candidates:
+      - id: lower_back_to_apex
+        meaning: Horizontal projection of the buttock apex off the lower back.
+        representation: direct
+        start_landmark: lower_back_at_apex
+        end_landmark: buttock_apex
+        drafting_variable: buttock_spacing_full
+        scale: 1.0
+      - id: half_projection
+        meaning: Half the projection off the lower back.
+        representation: half
+        start_landmark: lower_back_at_apex
+        end_landmark: buttock_apex
+        drafting_variable: buttock_spacing_full
+        scale: 2.0
+
+  underbust:
+    label: Underbust
+    category: circumference
+    quantity_type: circumference
+    anatomical_level: under_bust
+    representation: full
+    required: false
+    status: optional
+    drafting_variable: underbust_circumference
+    unit: cm
+    range: [35.0, 200.0]
+    definition: >-
+      Girth directly below the bust. Used as a consistency cross-check, never as the
+      source of the dart intake.
+
+  # ---- other lengths and angles, outside the bodice scope --------------------
+  arm_length:
+    label: Arm length
+    category: direct_length
+    quantity_type: linear_distance
+    start_landmark: shoulder_tip
+    end_landmark: wrist
+    required: false
+    status: optional
+    drafting_variable: arm_length
+    unit: cm
+    range: [20.0, 90.0]
+    definition: Distance from the shoulder tip to the wrist.
+
+  hips_line:
+    label: Hip line
+    category: vertical_level
+    quantity_type: vertical_level
+    origin: crotch_point
+    axis: vertical
+    required: false
+    status: optional
+    unit: cm
+    range: [0.0, 60.0]
+    definition: >-
+      Level of the fullest part of the hip. Its origin is the crotch point, NOT the neck
+      reference point, so it must never be subtracted against bust_line or waist_line.
+    candidates:
+      - id: level_from_crotch_point
+        meaning: Vertical level of the hip line, measured up from the crotch point.
+        origin: crotch_point
+        drafting_variable: crotch_to_hip_level
+        scale: 1.0
+
+  crotch_hip_diff:
+    label: Crotch to hip difference
+    category: relative_vertical_distance
+    quantity_type: vertical_distance
+    start_landmark: crotch_point
+    end_landmark: hip_line
+    axis: vertical
+    required: false
+    status: optional
+    drafting_variable: crotch_to_hip_vertical
+    unit: cm
+    range: [0.0, 60.0]
+    definition: Vertical distance from the crotch point up to the hip line.
+
+  hip_inclination:
+    label: Hip inclination
+    category: angle
+    quantity_type: angle
+    required: false
+    status: optional
+    unit: deg
+    range: [0.0, 90.0]
+    definition: Hip slope measured downward from the horizontal.
+    candidates:
+      - id: below_horizontal
+        meaning: Hip slope measured downward from the horizontal.
+        reference_axis: horizontal
+        sign_convention: positive_is_downward
+        drafting_variable: hip_inclination_degrees
+        scale: 1.0
+
+  arm_pose_angle:
+    label: Arm pose angle
+    category: angle
+    quantity_type: angle
+    required: false
+    status: optional
+    unit: deg
+    range: [0.0, 180.0]
+    definition: >-
+      Angle the arm is posed at in the capture. Recorded as an assumption because it
+      biases the measured girths; it never enters a drafting equation.
+    candidates:
+      - id: from_vertical
+        meaning: Arm elevation measured from the vertical, down by the body side.
+        reference_axis: vertical
+        sign_convention: positive_is_downward
+        drafting_variable: arm_pose_degrees
+        scale: 1.0
+
+  head_l:
+    label: Head length
+    category: direct_length
+    quantity_type: linear_distance
+    start_landmark: chin
+    end_landmark: crown
+    required: false
+    status: optional
+    drafting_variable: head_length
+    unit: cm
+    range: [10.0, 35.0]
+    definition: Chin to crown. A scale sanity check only.
+
+# ---- cross-field schema rules ------------------------------------------------
+# A failure of any blocking rule stops generation with a schema-validation message.
+consistency_rules:
+  - id: shared_vertical_origin
+    severity: blocking
+    description: >-
+      Fields combined by subtraction must declare the same origin. bust_line, waist_line
+      and waist_over_bust_line are differences of each other; hips_line and
+      crotch_hip_diff are measured from the crotch point and must not join that group.
+    members: [bust_line, waist_line, waist_over_bust_line]
+    compare: origin
+
+  - id: neck_reference_level_available
+    severity: blocking
+    description: >-
+      A vertical level taken from the top of the head cannot be used without a confirmed
+      level for the neck reference point, because the pattern frame starts there.
+    fields: [bust_line, waist_line, waist_over_bust_line]
+    forbidden_origin: top_of_head
+
+  - id: bust_apex_below_bust_line
+    severity: blocking
+    description: The bust apex must sit below the bust line.
+    compare: [neck_to_bust_level, neck_to_bust_apex_vertical]
+
+  - id: waist_below_bust
+    severity: blocking
+    description: The waist line must sit at least 8 cm below the bust line.
+    compare: [neck_to_bust_level, neck_to_waist_level]
+    minimum_gap_source_cm: 8.0
+
+  - id: back_share_of_girth
+    severity: warning
+    description: The back width must leave 30-60% of the girth for the front.
+    compare: [bust_circumference, back_width_full]
+
+  - id: underbust_below_bust
+    severity: warning
+    description: Underbust should be at least 1 cm smaller than bust.
+    compare: [bust_circumference, underbust_circumference]

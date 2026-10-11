@@ -155,9 +155,23 @@ th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--lin
 thead th { position: sticky; top: 0; background: var(--panel); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 tbody tr:last-child td, tbody tr:last-child th { border-bottom: none; }
 .row-warn { background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.row-error { background: color-mix(in srgb, var(--err) 12%, transparent); }
 .interpret { color: var(--muted); max-width: 46ch; }
 .nowrap { white-space: nowrap; }
 td small, th small { display: block; color: var(--muted); font-weight: 400; }
+
+/* measurement definitions table */
+table.definitions { min-width: 960px; }
+table.definitions th[scope='row'] { min-width: 11ch; }
+table.definitions td:nth-child(2) { width: 9ch; }
+table.definitions td:nth-child(3) { width: 5ch; }
+table.definitions td:nth-child(5) { width: 12ch; }
+.definition-detail > td {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  border-left: 3px solid var(--accent);
+}
+.definition-detail .toggle { align-items: flex-start; }
+.definition-detail code { margin-right: 6px; }
 .stat-row { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .stat { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; display: grid; gap: 2px; }
 .stat span { color: var(--muted); font-size: 13px; }

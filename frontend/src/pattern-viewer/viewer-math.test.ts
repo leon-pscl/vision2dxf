@@ -43,10 +43,16 @@ describe('measurement formatting', () => {
 })
 
 describe('workflow steps', () => {
+  it('puts the definitions gate before generation', () => {
+    const ids = STEPS.map((s) => s.id)
+    expect(ids.indexOf('definitions')).toBe(1)
+    expect(ids.indexOf('definitions')).toBeLessThan(ids.indexOf('generate'))
+  })
+
   it('stops at the first incomplete step', () => {
     const ready = Object.fromEntries(STEPS.map((s) => [s.id, true])) as Record<StepId, boolean>
     expect(firstIncompleteStep(ready)).toBe(STEPS.length - 1)
-    ready.review = false
-    expect(firstIncompleteStep(ready)).toBe(STEPS.findIndex((s) => s.id === 'review'))
+    ready.definitions = false
+    expect(firstIncompleteStep(ready)).toBe(STEPS.findIndex((s) => s.id === 'definitions'))
   })
 })

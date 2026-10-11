@@ -109,11 +109,13 @@ def test_round_trip_preserves_coordinates_exactly(basic_result):
     assert again == payload
 
 
-def test_serialisation_is_deterministic(basic_body):
+def test_serialisation_is_deterministic(basic_source, default_confirmations):
     from app.drafting.ease import Settings
     from app.drafting.pipeline import draft
-    first = to_fixture_dict(draft(basic_body, Settings()).document)
-    second = to_fixture_dict(draft(basic_body, Settings()).document)
+    from app.drafting.semantics import resolve
+    conf = default_confirmations
+    first = to_fixture_dict(draft(resolve(basic_source.values_cm, conf), Settings()).document)
+    second = to_fixture_dict(draft(resolve(basic_source.values_cm, conf), Settings()).document)
     assert json.dumps(first) == json.dumps(second)
 
 

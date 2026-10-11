@@ -1,0 +1,104 @@
+{
+  "basic": {
+    "schemaVersion": "1.0",
+    "canGenerate": true,
+    "statuses": {
+      "bust": "CONFIRMED",
+      "waist": "CONFIRMED",
+      "hips": "CONFIRMED",
+      "wrist": "CONFIRMED",
+      "leg_circ": "CONFIRMED",
+      "height": "CONFIRMED",
+      "back_width": "ASSUMED",
+      "waist_back_width": "ASSUMED",
+      "hip_back_width": "OPTIONAL",
+      "neck_w": "ASSUMED",
+      "shoulder_w": "ASSUMED",
+      "shoulder_incl": "ASSUMED",
+      "bust_line": "ASSUMED",
+      "waist_line": "ASSUMED",
+      "waist_over_bust_line": "OPTIONAL",
+      "vert_bust_line": "ASSUMED",
+      "armscye_depth": "ASSUMED",
+      "bust_points": "ASSUMED",
+      "bum_points": "OPTIONAL",
+      "underbust": "CONFIRMED",
+      "arm_length": "CONFIRMED",
+      "hips_line": "OPTIONAL",
+      "crotch_hip_diff": "CONFIRMED",
+      "hip_inclination": "OPTIONAL",
+      "arm_pose_angle": "OPTIONAL",
+      "head_l": "CONFIRMED"
+    },
+    "blocking": [],
+    "draftingMeasurements": {
+      "bust_circumference": 858.0,
+      "waist_circumference": 856.0,
+      "hip_circumference": 1005.0,
+      "underbust_circumference": 858.0,
+      "shoulder_width_full": 342.0,
+      "back_width_full": 390.0,
+      "waist_back_width_full": 387.0,
+      "hip_back_width_full": null,
+      "neck_width_half": 165.0,
+      "neck_to_bust_level": 294.0,
+      "neck_to_waist_level": 411.0,
+      "neck_to_bust_apex_vertical": 359.0,
+      "bust_to_waist_vertical": 117.0,
+      "waist_to_hip_vertical": null,
+      "armscye_depth_vertical": 201.0,
+      "bust_apex_spacing_full": 146.0,
+      "buttock_spacing_full": null,
+      "shoulder_slope_degrees": 45.0,
+      "stature": 1670.0,
+      "arm_length": 626.0
+    }
+  },
+  "pascual": {
+    "schemaVersion": "1.0",
+    "canGenerate": false,
+    "statuses": {
+      "bust": "CONFIRMED",
+      "waist": "CONFIRMED",
+      "hips": "CONFIRMED",
+      "wrist": "CONFIRMED",
+      "leg_circ": "CONFIRMED",
+      "height": "CONFIRMED",
+      "back_width": "ASSUMED",
+      "waist_back_width": "ASSUMED",
+      "hip_back_width": "OPTIONAL",
+      "neck_w": "ASSUMED",
+      "shoulder_w": "ASSUMED",
+      "shoulder_incl": "ASSUMED",
+      "bust_line": "INVALID",
+      "waist_line": "INVALID",
+      "waist_over_bust_line": "INVALID",
+      "vert_bust_line": "ASSUMED",
+      "armscye_depth": "ASSUMED",
+      "bust_points": "ASSUMED",
+      "bum_points": "OPTIONAL",
+      "underbust": "CONFIRMED",
+      "arm_length": "CONFIRMED",
+      "hips_line": "OPTIONAL",
+      "crotch_hip_diff": "CONFIRMED",
+      "hip_inclination": "OPTIONAL",
+      "arm_pose_angle": "OPTIONAL",
+      "head_l": "CONFIRMED"
+    },
+    "blocking": [
+      [
+        "bust_line",
+        "INVALID"
+      ],
+      [
+        "waist_line",
+        "INVALID"
+      ],
+      [
+        "waist_over_bust_line",
+        "INVALID"
+      ]
+    ],
+    "draftingMeasurements": null
+  }
+}

@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .api.routes import router
 from .drafting.measurements import MeasurementError
+from .drafting.semantics import SemanticError
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -21,8 +22,21 @@ async def measurement_error_handler(_request, exc: MeasurementError):
     from fastapi.responses import JSONResponse
     return JSONResponse(
         status_code=422,
-        content={"error": {"code": "invalid_measurements", "message": "Measurement import failed.",
+        content={"error": {"code": "invalid_yaml", "message": "Measurement import failed.",
                            "details": exc.errors}},
+    )
+
+
+@app.exception_handler(SemanticError)
+async def semantic_error_handler(_request, exc: SemanticError):
+    """A broken schema configuration is a developer error, surfaced without a stack trace."""
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"code": "schema_configuration_error",
+                           "message": str(exc),
+                           "details": [{"field": exc.field_name or "schema",
+                                        "message": "Fix config/measurement-semantics.yaml"}]}},
     )
 
 

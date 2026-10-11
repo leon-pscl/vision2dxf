@@ -5,8 +5,9 @@ from pathlib import Path
 import pytest
 
 from app.drafting.ease import Settings
-from app.drafting.measurements import parse_measurements
+from app.drafting.measurements import parse_source
 from app.drafting.pipeline import draft
+from app.drafting.semantics import registry, resolve
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 
@@ -16,23 +17,43 @@ def yaml_text(name: str) -> str:
 
 
 @pytest.fixture(scope="session")
-def basic_body():
-    return parse_measurements(yaml_text("body_measurements.yaml"))
+def semantics_registry():
+    return registry()
 
 
 @pytest.fixture(scope="session")
-def pascual_body():
-    return parse_measurements(yaml_text("body_measurements_pascual.yaml"))
+def default_confirmations(semantics_registry) -> dict[str, str]:
+    """The interpretation an operator picks for every ambiguous field."""
+    return {
+        name: f.candidates[0].id
+        for name, f in semantics_registry.fields.items()
+        if f.status == "ambiguous"
+    }
 
 
 @pytest.fixture(scope="session")
-def basic_result(basic_body):
-    return draft(basic_body, Settings())
+def basic_source():
+    return parse_source(yaml_text("body_measurements.yaml"))
 
 
 @pytest.fixture(scope="session")
-def pascual_result(pascual_body):
-    return draft(pascual_body, Settings())
+def pascual_source():
+    return parse_source(yaml_text("body_measurements_pascual.yaml"))
+
+
+@pytest.fixture(scope="session")
+def basic_resolution(basic_source, default_confirmations):
+    return resolve(basic_source.values_cm, default_confirmations)
+
+
+@pytest.fixture(scope="session")
+def pascual_resolution(pascual_source, default_confirmations):
+    return resolve(pascual_source.values_cm, default_confirmations)
+
+
+@pytest.fixture(scope="session")
+def basic_result(basic_resolution):
+    return draft(basic_resolution, Settings())
 
 
 @pytest.fixture(scope="session")

@@ -29,29 +29,27 @@ class SettingsPayload(BaseModel):
     unit: str = "cm"
 
 
-class GenerateRequest(BaseModel):
+class SemanticsRequest(BaseModel):
+    """A generation request up to, but not including, the geometry.
+
+    `confirmations` selects one of the interpretations the schema registry offers for a
+    field; it cannot invent one. `corrections` replaces a subject's numeric value only.
+    """
+
+    model_config = ConfigDict(extra="forbid")
     yamlText: str
     filename: str = "body_measurements.yaml"
+    confirmations: dict[str, str] = Field(default_factory=dict)
+    corrections: dict[str, float] = Field(default_factory=dict)
+
+
+class GenerateRequest(SemanticsRequest):
     settings: SettingsPayload = Field(default_factory=SettingsPayload)
+
+
+ExportRequest = GenerateRequest
 
 
 class RenderRequest(BaseModel):
     pattern: dict[str, Any]
-    layers: list[str] | None = None
     dark: bool = False
-    showGrid: bool = True
-
-
-class ExportRequest(BaseModel):
-    yamlText: str
-    filename: str = "body_measurements.yaml"
-    settings: SettingsPayload = Field(default_factory=SettingsPayload)
-
-
-class MeasurementReviewResponse(BaseModel):
-    ok: bool
-    filename: str
-    unit: str
-    rows: list[dict]
-    warnings: list[dict]
-    dictionary: dict
