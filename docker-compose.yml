@@ -1,11 +1,11 @@
 services:
-  app:
-    build: .
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: formula-drafting:1.0.0
     ports:
-      - "8000:8000"
-    volumes:
-      # The whole repo, so source, config, scripts, weights and captured data all
-      # come from the host. Dependencies live in /opt/venv, outside /app, so they
-      # survive the mount -- but changing them still needs `up --build`.
-      - .:/app
-    command: ["uvicorn", "bodymeasure.api:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+      - "${PORT:-8000}:8000"
+    environment:
+      - TZ=UTC
+    restart: unless-stopped

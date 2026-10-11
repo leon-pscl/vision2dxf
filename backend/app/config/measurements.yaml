@@ -1,0 +1,349 @@
+# Measurement dictionary.
+#
+# Every field of `body_measurements.yaml` is declared here with its unit, the
+# landmark it is taken from, the origin of its axis, the direction of measurement
+# and how the drafting engine interprets it. Fields whose names look alike do NOT
+# share an origin (design doc, "Input Validation"), so the origin is explicit.
+#
+# Axis conventions declared below:
+#   girth_*        origin = the girth line of the named region
+#   neck_point_*   origin = the neck point (top of the pattern on the centre line),
+#                  direction +down, so the value is a drop below the neck point
+#   crotch_*       origin = the crotch point, direction +up
+#   angular        origin = the anatomical joint, direction = rotation
+#
+# `interpretation` states exactly how the number is turned into pattern geometry.
+# `used_by` lists the drafting rules that consume the value (see drafting/rules.py).
+
+units: cm
+fields:
+  - name: height
+    label: Height
+    kind: stature
+    origin: floor
+    direction: up
+    landmark: whole body
+    interpretation: Overall stature. Used only for plausibility checks, not geometry.
+    min: 120.0
+    max: 210.0
+    used_by: []
+
+  - name: bust
+    label: Bust circumference
+    kind: circumference
+    origin: girth_bust
+    direction: horizontal
+    landmark: fullest point of the chest
+    interpretation: >-
+      Full bust girth. Split against back_width into the front and back panel
+      half-widths; the split point is the side seam.
+    min: 50.0
+    max: 180.0
+    used_by: [der.front_bust_half_width, der.bust_with_ease]
+
+  - name: underbust
+    label: Underbust circumference
+    kind: circumference
+    origin: girth_underbust
+    direction: horizontal
+    landmark: directly below the bust
+    interpretation: >-
+      Girth under the bust. Cross-checked against bust to flag an implausible
+      chest shape; it does not drive the dart intake (bust_points does).
+    min: 45.0
+    max: 175.0
+    used_by: [chk.underbust_vs_bust]
+
+  - name: waist
+    label: Waist circumference
+    kind: circumference
+    origin: girth_waist
+    direction: horizontal
+    landmark: natural waist
+    interpretation: Full waist girth; split against waist_back_width at the side seam.
+    min: 40.0
+    max: 180.0
+    used_by: [der.waist_with_ease, der.front_waist_half_width]
+
+  - name: hips
+    label: Hip circumference
+    kind: circumference
+    origin: girth_hip
+    direction: horizontal
+    landmark: fullest point of the hip
+    interpretation: Full hip girth. Outside the bodice scope; validated and reported only.
+    min: 50.0
+    max: 200.0
+    used_by: []
+
+  - name: back_width
+    label: Back width at the bust line
+    kind: width
+    origin: girth_bust
+    direction: horizontal
+    landmark: from one side seam around the centre back to the other side seam
+    interpretation: >-
+      Tape distance across the back at the bust line. The back half-pattern width is
+      half of this value; the front half-pattern width is (bust - back_width) / 2.
+    min: 20.0
+    max: 120.0
+    used_by: [der.back_bust_half_width, der.front_bust_half_width]
+
+  - name: waist_back_width
+    label: Back width at the waist line
+    kind: width
+    origin: girth_waist
+    direction: horizontal
+    landmark: from one side seam around the centre back to the other side seam
+    interpretation: Back width at the waist line; back waist half-pattern width is half of it.
+    min: 20.0
+    max: 120.0
+    used_by: [der.back_waist_half_width, der.front_waist_half_width]
+
+  - name: hip_back_width
+    label: Back width at the hip line
+    kind: width
+    origin: girth_hip
+    direction: horizontal
+    landmark: from one side seam around the centre back to the other side seam
+    interpretation: Back width at the hip line; outside the bodice scope.
+    min: 20.0
+    max: 130.0
+    used_by: []
+
+  - name: neck_w
+    label: Half neck girth
+    kind: width
+    origin: girth_neck
+    direction: horizontal
+    landmark: base of the neck
+    interpretation: >-
+      Half of the neck girth, i.e. the target neckline seam length. The horizontal
+      distance from the centre neck point to the neck-shoulder point is
+      neck_w * constants.neck_shoulder_share.
+    min: 8.0
+    max: 30.0
+    used_by: [der.neck_shoulder_x, der.front_neck_depth, der.back_neck_depth]
+
+  - name: shoulder_w
+    label: Half shoulder width
+    kind: width
+    origin: girth_shoulder
+    direction: horizontal
+    landmark: neck point to shoulder tip across the top of the shoulder
+    interpretation: >-
+      Body-measured distance from the neck point to the shoulder tip. The drafted
+      shoulder seam is shorter by constants.shoulder_neck_offset_mm.
+    min: 8.0
+    max: 45.0
+    used_by: [der.shoulder_seam_length]
+
+  - name: shoulder_incl
+    label: Shoulder inclination
+    kind: angle_deg
+    origin: shoulder_joint
+    direction: rotation_from_horizontal
+    landmark: shoulder tip
+    interpretation: >-
+      Shoulder slope measured down from the horizontal. Values outside
+      ranges.shoulder_slope_deg are clamped and reported, because an unclamped
+      slope pushes the underarm point through the bust line.
+    min: 5.0
+    max: 60.0
+    used_by: [der.shoulder_slope_deg]
+
+  - name: armscye_depth
+    label: Armscye depth
+    kind: length
+    origin: shoulder_tip_level
+    direction: down
+    landmark: shoulder tip down to the underarm point
+    interpretation: Vertical drop from the shoulder-tip level to the underarm point.
+    min: 12.0
+    max: 35.0
+    used_by: [lm.front.underarm_y, lm.back.underarm_y]
+
+  - name: bust_line
+    label: Bust line
+    kind: length
+    origin: neck_point
+    direction: down
+    landmark: neck point to the bust line
+    interpretation: Drop from the neck point to the bust (chest) line; a y level only.
+    min: 15.0
+    max: 45.0
+    used_by: [lm.front.bust_level_y, lm.back.bust_level_y]
+
+  - name: waist_line
+    label: Waist line
+    kind: length
+    origin: neck_point
+    direction: down
+    landmark: neck point to the natural waist
+    interpretation: Drop from the neck point to the waist line; the lower edge of the bodice.
+    min: 25.0
+    max: 60.0
+    used_by: [lm.front.waist_level_y, lm.back.waist_level_y]
+
+  - name: waist_over_bust_line
+    label: Over-bust line
+    kind: length
+    origin: neck_point
+    direction: down
+    landmark: neck point to the tape line passing over the bust
+    interpretation: >-
+      Drop from the neck point to the over-bust measuring line. Reported for review;
+      the strapless bodice draft does not use it.
+    min: 15.0
+    max: 45.0
+    used_by: []
+
+  - name: vert_bust_line
+    label: Vertical bust line (bust apex level)
+    kind: length
+    origin: neck_point
+    direction: down
+    landmark: neck point to the bust apex
+    interpretation: >-
+      Drop from the neck point to the level of the bust apex. NOTE: this is a
+      different origin level from bust_line even though the names are similar; the
+      two are compared and a disagreement is reported.
+    min: 15.0
+    max: 50.0
+    used_by: [lm.front.bust_apex_y]
+
+  - name: bust_points
+    label: Bust projection
+    kind: length
+    origin: bust_apex
+    direction: horizontal
+    landmark: chest wall to bust apex
+    interpretation: >-
+      Projection of the bust apex off the chest wall. Sets the waist dart intake
+      (constants.dart_intake_ratio) and the horizontal position of the apex.
+    min: 3.0
+    max: 35.0
+    used_by: [der.dart_intake, der.bust_apex_x]
+
+  - name: bum_points
+    label: Buttock projection
+    kind: length
+    origin: buttock_apex
+    direction: horizontal
+    landmark: lower back to buttock apex
+    interpretation: Buttock projection; outside the bodice scope.
+    min: 3.0
+    max: 35.0
+    used_by: []
+
+  - name: hips_line
+    label: Hip line
+    kind: length
+    origin: crotch
+    direction: up
+    landmark: crotch point to the fullest point of the hip
+    interpretation: >-
+      Rise from the crotch point to the hip line. This origin is the crotch, NOT the
+      neck point, so it must never be subtracted from bust_line or waist_line.
+      Outside the bodice scope.
+    min: 5.0
+    max: 40.0
+    used_by: []
+
+  - name: crotch_hip_diff
+    label: Crotch to hip difference
+    kind: length
+    origin: crotch
+    direction: down
+    landmark: crotch point to the seat fold
+    interpretation: Outside the bodice scope.
+    min: 3.0
+    max: 45.0
+    used_by: []
+
+  - name: hip_inclination
+    label: Hip inclination
+    kind: angle_deg
+    origin: hip_joint
+    direction: rotation_from_horizontal
+    landmark: hip
+    interpretation: Outside the bodice scope.
+    min: 0.0
+    max: 45.0
+    used_by: []
+
+  - name: arm_length
+    label: Arm length
+    kind: length
+    origin: shoulder_tip
+    direction: down
+    landmark: shoulder tip to wrist
+    interpretation: >-
+      Shoulder tip to wrist. Scaled by (height / 167) into a pattern unit so a sleeve
+      can be drafted later without re-importing; unused by the bodice draft.
+    min: 30.0
+    max: 80.0
+    used_by: []
+
+  - name: arm_pose_angle
+    label: Arm pose angle
+    kind: angle_deg
+    origin: shoulder_joint
+    direction: rotation_from_vertical
+    landmark: shoulder joint
+    interpretation: >-
+      Camera pose of the arm. Recorded as an assumption because it biases the
+      measured girths; unused by the bodice draft.
+    min: 0.0
+    max: 90.0
+    used_by: []
+
+  - name: wrist
+    label: Wrist girth
+    kind: circumference
+    origin: girth_wrist
+    direction: horizontal
+    landmark: wrist
+    interpretation: Outside the bodice scope.
+    min: 8.0
+    max: 30.0
+    used_by: []
+
+  - name: leg_circ
+    label: Leg (thigh) girth
+    kind: circumference
+    origin: girth_thigh
+    direction: horizontal
+    landmark: thigh
+    interpretation: Outside the bodice scope.
+    min: 25.0
+    max: 90.0
+    used_by: []
+
+  - name: head_l
+    label: Head length
+    kind: length
+    origin: chin
+    direction: down
+    landmark: chin to crown
+    interpretation: >-
+      Chin to crown. Only used as a sanity check that the scan scale is plausible
+      against height; not a pattern measurement.
+    min: 15.0
+    max: 30.0
+    used_by: []
+
+# Cross-field consistency checks. Each is reported, never auto-corrected.
+checks:
+  - id: chk.underbust_vs_bust
+    description: Underbust must be smaller than bust by at least 1 cm.
+    applies_to: [underbust, bust]
+  - id: chk.bust_apex_below_bust_line
+    description: The bust apex level must be below the bust line.
+    applies_to: [vert_bust_line, bust_line]
+  - id: chk.waist_below_bust
+    description: The waist line must be below the bust line by at least 8 cm.
+    applies_to: [waist_line, bust_line]
+  - id: chk.back_share_of_bust
+    description: back_width must leave 30-60% of the bust girth for the front.
+    applies_to: [back_width, bust, waist_back_width, waist]

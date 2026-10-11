@@ -1,0 +1,102 @@
+# Drafting constants, tolerances and presets.
+# Every magic number used by the drafting engine lives here; no unexplained
+# constants are allowed inside geometry functions (design doc, "Drafting Rule Registry").
+version: "1.0.0"
+units: mm
+
+# Flattening resolution used when a bezier is serialised as a sampled polyline.
+# The reference fixture stores dense, near-uniform samples per edge; we match that
+# representation with an explicit, deterministic spacing.
+sample_spacing_mm: 2.0
+
+tolerances:
+  endpoint_continuity_mm: 0.1
+  panel_closure_mm: 0.1
+  duplicate_point_mm: 0.01
+  self_intersections: 0
+  seam_mismatch_abs_mm: 2.0
+  seam_mismatch_rel: 0.005
+
+# Plausibility windows. A value outside the window is *reported*, never silently
+# rewritten, unless the window is explicitly a clamp (see `clamped` below).
+ranges:
+  height_cm: [120.0, 210.0]
+  shoulder_slope_deg: [15.0, 30.0]
+  dart_intake_ratio: [0.2, 0.6]
+  front_neck_depth_ratio: [0.35, 0.9]
+  armscye_above_bust_mm: 60.0
+
+# The shoulder slope is the only input clamped into a drafting window; the clamp
+# is always accompanied by a warning carrying the original value.
+clamped:
+  shoulder_slope_deg: true
+
+constants:
+  # distance from the shoulder-neck point back along the shoulder to the neck point
+  shoulder_neck_offset_mm: 50.0
+  # neckline half width = share * neck_w   (neck_w is read as half neck girth)
+  neck_shoulder_share: 0.45
+  # The neck-shoulder point sits this far above the centre neck point on BOTH panels,
+  # so front and back share one shoulder reference line and their side seams sew to
+  # the same length. Front/back neckline shape is set by the depth ratios below.
+  neck_rise_mm: 8.0
+  front_neck_depth_ratio: 0.62
+  front_neck_dip_x_ratio: 0.38
+  back_neck_depth_ratio: 0.35
+  back_neck_dip_x_ratio: 0.45
+  # bust apex sits this fraction of the bust projection inboard of the side seam
+  bust_apex_inset_ratio: 0.55
+  # waist dart intake as a fraction of the measured bust projection
+  dart_intake_ratio: 0.40
+  dart_top_offset_mm: 15.0
+  dart_min_height_mm: 40.0
+  # cubic handle length as a fraction of the chord (neckline / armscye)
+  neckline_handle_ratio: 0.42
+  armscye_handle_ratio: 0.58
+  # warning when the underarm point ends up above the bust line
+  armscye_min_below_bust_mm: 0.0
+
+ease_presets:
+  skin_thin: { bust_mm: 20.0, waist_mm: 20.0, hip_mm: 20.0 }
+  close_fitting: { bust_mm: 50.0, waist_mm: 50.0, hip_mm: 50.0 }
+  fitted: { bust_mm: 80.0, waist_mm: 80.0, hip_mm: 80.0 }
+  relaxed: { bust_mm: 140.0, waist_mm: 140.0, hip_mm: 140.0 }
+
+default_ease_preset: fitted
+
+# Seam allowance per semantic edge role. centre edges fold on the fold line (0).
+seam_allowance_mm:
+  default: 10.0
+  neckline: 8.0
+  shoulder: 8.0
+  armscye: 8.0
+  side_seam: 10.0
+  waist: 12.0
+  center_front: 0.0
+  center_back: 0.0
+  dart: 10.0
+
+cutting_join: miter  # miter | bevel | round
+
+paper:
+  default_size: A0
+  default_orientation: landscape
+  margin_mm: 30.0
+  gap_mm: 100.0
+  sizes_mm:
+    A0: [1189.0, 841.0]
+    A1: [841.0, 594.0]
+    A2: [594.0, 420.0]
+    A3: [420.0, 297.0]
+    A4: [297.0, 210.0]
+
+# Values copied verbatim from sample/000c79de6519526691ff7b988eb6b92a.json.
+# Their meaning is not derivable from the fixture alone, so they are preserved as
+# fixture-compatible constants (design doc: "preserve verified fixture-compatible
+# defaults and document them").
+fixture_defaults:
+  panel_particle_distance: 6
+  panel_collision_layer: 0
+  seq_edge_type: 3
+  seq_edge_circle_type: 0
+  edge_bezier_points: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]

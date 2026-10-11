@@ -1,4 +1,0 @@
-# A CRLF shebang makes Linux look for an interpreter called "/bin/sh\r" and the
-# container dies with "no such file or directory". Windows checkouts default to
-# CRLF, so pin every script that runs inside the image to LF.
-*.sh text eol=lf
