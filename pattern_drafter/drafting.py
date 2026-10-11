@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import datetime as _dt
+import importlib.util as _importlib
 import numbers
 import os
+import sys
 import tempfile
+import types as _types
 from pathlib import Path
 from typing import Any, Dict, List, Mapping
 
@@ -36,13 +39,52 @@ _POINT_ATTRS = (
 )
 
 
+def _install_pkg_resources_shim() -> None:
+    """Provide a minimal ``pkg_resources`` when setuptools >= 82 removed it.
+
+    OpenPattern imports ``pkg_resources`` at module load and only ever calls
+    ``resource_filename`` to resolve its bundled measurements database, a path
+    we always override through the ``dbPATH`` keyword argument.
+    """
+    try:
+        import pkg_resources  # noqa: F401
+    except ModuleNotFoundError:
+        pass
+    else:
+        return
+
+    if "pkg_resources" in sys.modules:
+        return
+
+    def resource_filename(
+        package_or_requirement: str, resource_name: str
+    ) -> str:
+        spec = _importlib.find_spec(package_or_requirement)
+        if spec is None:
+            raise ModuleNotFoundError(package_or_requirement)
+        locations = spec.submodule_search_locations
+        if locations:
+            base = next(iter(locations))
+        elif spec.origin:
+            base = os.path.dirname(spec.origin)
+        else:
+            raise FileNotFoundError(package_or_requirement)
+        return os.path.join(base, resource_name)
+
+    shim = _types.ModuleType("pkg_resources")
+    shim.resource_filename = resource_filename
+    sys.modules["pkg_resources"] = shim
+
+
 def _import_openpattern():
+    _install_pkg_resources_shim()
     try:
         import OpenPattern  # type: ignore
     except Exception as exc:  # pragma: no cover - depends on the environment
         raise OpenPatternMissing(
             "OpenPattern is required to draft patterns. Install it with:\n"
-            "    pip install git+https://github.com/fmetivier/OpenPattern.git"
+            "    pip install git+https://github.com/fmetivier/OpenPattern.git\n\n"
+            "Underlying error: %s: %s" % (type(exc).__name__, exc)
         ) from exc
     return OpenPattern
 

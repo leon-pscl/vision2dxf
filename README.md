@@ -202,6 +202,31 @@ waist/bust/hip guide lines and a 5 cm scale bar.
 └── tests/                         # pytest suite
 ```
 
+## Troubleshooting
+
+### `build` fails with the "OpenPattern is required" message
+
+If `app.py build` reports `OpenPattern is required to draft patterns` even
+though the installation succeeded (and `app.py templates` / `check` still work),
+the underlying cause is usually the deprecated `pkg_resources` module: OpenPattern
+imports it at load time, and `pkg_resources` was **removed** from `setuptools`
+starting with **setuptools 82** (February 2026).
+
+`pattern_drafter` handles this automatically by injecting a minimal
+`pkg_resources` stand-in before importing OpenPattern (OpenPattern only uses it
+to locate a bundled database that this tool overrides anyway), so no action is
+needed. If you still hit the error, run:
+
+```bash
+python -c "import pkg_resources"
+```
+
+and if it fails, reinstall a setuptools that still ships `pkg_resources`:
+
+```bash
+pip install --force-reinstall "setuptools<82"
+```
+
 ## Development
 
 ```bash
