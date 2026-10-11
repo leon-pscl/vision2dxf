@@ -423,7 +423,18 @@ def resolve(
 
         candidate = next((c for c in fdef.candidates if c.id == candidate_id), None)
         if candidate is None:
-            raise SemanticError(f"confirmation {candidate_id!r} is not a candidate of {name}", name)
+            # Bad operator input, not a broken schema: stay blocked and say why.
+            offered = ", ".join(c.id for c in fdef.candidates)
+            message = (f"Confirmation '{candidate_id}' is not a candidate of {fdef.label}. "
+                       f"Offered: {offered}.")
+            if fdef.required:
+                blocking.append(_block(name, "AMBIGUOUS", message,
+                                       "Pick one of the offered interpretations."))
+            fields[name] = _blank(fdef, reg, AMBIGUOUS, message)
+            fields[name].original_value = original
+            fields[name].source_value = value
+            fields[name].corrected = corrected
+            continue
 
         # Angles are already in degrees and must not be scaled by the length conversion.
         is_angle = fdef.category == "angle"

@@ -39,7 +39,8 @@ def _settings(payload) -> Settings:
     return Settings(**payload.model_dump())
 
 
-def _semantics(req):
+def _semantics(req) -> tuple[tuple, JSONResponse | None]:
+    """Never returns None: an unresolved import becomes a structured 422, not a crash."""
     try:
         return resolve_semantics(req.yamlText, req.filename, req.confirmations, req.corrections), None
     except MeasurementError as exc:

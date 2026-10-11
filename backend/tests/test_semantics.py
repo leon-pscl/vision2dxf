@@ -126,6 +126,15 @@ def test_optional_field_absent_does_not_block(basic_source, default_confirmation
     assert resolution.fields["wrist"].status == OPTIONAL
 
 
+def test_an_unknown_confirmation_is_client_input_not_a_crash(basic_source, default_confirmations):
+    resolution = resolve(basic_source.values_cm, {**default_confirmations, "shoulder_w": "nope"})
+    assert not resolution.can_generate
+    res = resolution.fields["shoulder_w"]
+    assert res.status == AMBIGUOUS
+    assert "not a candidate" in res.message
+    assert any(b["field"] == "shoulder_w" for b in resolution.blocking)
+
+
 # ---- normalization ----------------------------------------------------------
 
 def test_units_are_converted_and_recorded(basic_resolution):

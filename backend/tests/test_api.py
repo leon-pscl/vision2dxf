@@ -257,3 +257,79 @@ def test_config_endpoint():
 
 def test_healthz():
     assert client.get("/healthz").json() == {"status": "ok"}
+
+
+def test_index_is_served_at_the_root():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "<div id=\"root\">" in response.text
+
+
+def test_unknown_paths_are_404_not_a_page_of_html():
+    """A probe must not be answered with 200 and an index page."""
+    for path in ("/health", "/v1/models", "/api/does-not-exist"):
+        response = client.get(path)
+        assert response.status_code == 404, path
+        if path.startswith("/api"):
+            assert response.json()["error"]["code"] == "not_found"
+
+
+def test_built_assets_are_served():
+    index = client.get("/").text
+    asset = next(part for part in index.split('"') if part.startswith("/assets/") and part.endswith(".js"))
+    assert client.get(asset).status_code == 200
+
+
+# ---- the exact sequence a browser runs --------------------------------------
+
+def test_browser_sequence_from_upload_to_generation(yaml_ok, confirmations):
+    """Reproduce the click path: syntax -> definitions -> generate, in that order."""
+    assert client.post("/api/measurements/validate",
+                       json={"filename": "body.yaml", "content": yaml_ok}).status_code == 200
+    assert client.post("/api/measurements/semantics",
+                       json={"yamlText": yaml_ok}).status_code == 200
+    assert client.post("/api/measurements/semantics",
+                       json={"yamlText": yaml_ok, "confirmations": confirmations}).status_code == 200
+    assert client.post("/api/patterns/generate",
+                       json={"yamlText": yaml_ok, "confirmations": confirmations}).status_code == 200
+
+
+def test_no_endpoint_returns_a_raw_traceback(yaml_ok, confirmations):
+    """Broken payloads come back as structured errors, never a 500 stack trace."""
+    # an unknown candidate is reported on /semantics so the screen can render it, and
+    # refused by /generate
+    reported = {"yamlText": yaml_ok, "confirmations": {"shoulder_w": "not_a_candidate"}}
+    response = client.post("/api/measurements/semantics", json=reported)
+    assert response.status_code == 200
+    assert "Traceback" not in response.text
+    gated = client.post("/api/patterns/generate", json=reported)
+    assert gated.status_code == 409
+    assert {"code", "message", "details"} <= set(gated.json()["error"])
+
+    # an unparseable correction is rejected at the request boundary
+    unparseable = {"yamlText": yaml_ok, "confirmations": confirmations, "corrections": {"bust": "wide"}}
+    for path in ("/api/measurements/semantics", "/api/patterns/generate"):
+        response = client.post(path, json=unparseable)
+        assert response.status_code == 422, path
+        assert "Traceback" not in response.text
+
+
+def test_unknown_request_keys_are_rejected_by_the_schema(yaml_ok):
+    response = client.post("/api/measurements/semantics",
+                           json={"yamlText": yaml_ok, "confirmations_unknown": 1})
+    assert response.status_code == 422
+    assert "Traceback" not in response.text
+
+
+def test_an_unknown_candidate_is_refused_and_stays_blocked(yaml_ok):
+    """Reported on /semantics so the operator can correct it, refused by /generate."""
+    payload = {"yamlText": yaml_ok, "confirmations": {"shoulder_w": "nope"}}
+    data = client.post("/api/measurements/semantics", json=payload).json()
+    assert data["source"]["canGenerate"] is False
+    detail = next(d for d in data["source"]["blocking"] if d["field"] == "shoulder_w")
+    assert "not a candidate" in detail["message"]
+    assert "half_neck_to_shoulder_tip" in detail["message"]
+
+    gated = client.post("/api/patterns/generate", json=payload)
+    assert gated.status_code == 409
+    assert gated.json()["error"]["code"] == "semantics_unresolved"
