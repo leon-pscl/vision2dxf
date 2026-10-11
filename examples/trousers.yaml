@@ -1,0 +1,21 @@
+# Example measurement file: basic trousers block
+#
+# Drafts men's basic trousers with the Donnanno method (the only style
+# implemented upstream for trousers).  Values come from OpenPattern size
+# M44D and are expressed in cm.
+
+template: trousers
+style: Donnanno
+gender: m            # m = man, w = woman
+profile_name: trousers_donnanno_m44
+darts: false         # add hip darts
+
+measurements:
+  tour_taille: 80.0             # waist circumference
+  tour_bassin: 89.0             # hip circumference
+  hauteur_bassin: 19.2          # hip depth
+  hauteur_taille_genou: 58.0    # waist to knee length
+  montant: 23.2                 # rise / crotch depth
+  longueur_taille_terre: 104.0  # waist to floor (total outseam)
+  # Alternative length keys accepted instead of longueur_taille_terre:
+  #   longueur_tot, hauteur_taille_terre, entrejambe_terre

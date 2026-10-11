@@ -1,0 +1,17 @@
+# Example measurement file: basic (pencil) skirt block
+#
+# Drafts a women's straight skirt with the Gilewska method.  Values are the
+# skirt-related subset of the OpenPattern W36G size, in cm.
+
+template: skirt
+style: Gilewska      # Gilewska | Donnanno | Chiappetta
+gender: w            # w = woman, m = man
+profile_name: skirt_gilewska_w36
+ease: 8              # wearing ease in cm
+
+measurements:
+  tour_taille: 62.0             # waist circumference
+  tour_bassin: 88.0             # hip circumference
+  hauteur_bassin: 19.5          # hip depth
+  hauteur_taille_genou: 58.0    # waist to knee length
+  ecart_poitrine: 19.0          # bust point separation (dart placement)

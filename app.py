@@ -1,180 +1,179 @@
 #!/usr/bin/env python3
+"""pattern_drafter command line interface.
+
+Draft sewing patterns from YAML measurement files using the OpenPattern
+library, then export them as structured JSON and a visual PDF.
+
+Examples
+--------
+    python app.py templates
+    python app.py check examples/bodice.yaml
+    python app.py build examples/bodice.yaml examples/skirt.yaml
+    python app.py build --outdir outputs examples
+"""
+
 from __future__ import annotations
+
+import argparse
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+from typing import Sequence
 
-import streamlit as st
-import pandas as pd
-import json
+from pattern_drafter.drafting import OpenPatternMissing
+from pattern_drafter.measurements import (
+    MeasurementError,
+    TEMPLATES,
+    load_measurement_file,
+    validate_measurement_file,
+)
+from pattern_drafter.pipeline import iter_yaml_files, process_file
 
-from vision2dxf.core.models import MeasurementProfile
-from vision2dxf.core.interfaces import load_profiles
-from vision2dxf.core.validation import validate_pattern
-from vision2dxf.core.preview import render_preview
-from vision2dxf.core.dxf_export import export_json, export_dxf
-from vision2dxf.designs.formula_based.generator import FormulaBasedGenerator
-from vision2dxf.designs.parametric_block.generator import ParametricBlockGenerator
-from vision2dxf.designs.template_grading.generator import TemplateGradingGenerator
-from vision2dxf.evaluation.code_metrics import measure_code_metrics
-
-st.set_page_config(page_title="Vision2DXF", layout="wide")
-
-GENERATORS = {
-    "Design A — Formula-Based": FormulaBasedGenerator(),
-    "Design B — Parametric Block": ParametricBlockGenerator(),
-    "Design C — Template Grading": TemplateGradingGenerator(),
-}
-
-PROFILES_PATH = Path("config/test_profiles.json")
-
-DESIGN_PATHS = [
-    "src/vision2dxf/designs/formula_based",
-    "src/vision2dxf/designs/parametric_block",
-    "src/vision2dxf/designs/template_grading",
-]
+DEFAULT_OUTDIR = "outputs"
+DEFAULT_FORMATS = "json,pdf"
 
 
-def _load_profiles_cached():
-    if PROFILES_PATH.exists():
-        return load_profiles(PROFILES_PATH)
-    return []
+def _print_result(result) -> None:
+    data = result.data
+    bounds = data["bounds"]
+    print(
+        "  + %-24s template=%-9s style=%-11s panels=%d points=%d"
+        % (
+            result.config["profile_name"],
+            result.config["template"],
+            result.config["style"],
+            len(data["panels"]),
+            sum(len(g["points"]) for g in data["points"].values()),
+        )
+    )
+    print(
+        "    bounds: x[%.1f, %.1f] y[%.1f, %.1f] cm"
+        % (bounds["xmin"], bounds["xmax"], bounds["ymin"], bounds["ymax"])
+    )
+    for path in result.written:
+        print("    -> %s" % path)
 
 
-def _profile_to_dict(p: MeasurementProfile) -> dict:
-    return {
-        "profile_id": p.profile_id, "chest": p.chest, "waist": p.waist,
-        "hip": p.hip, "shoulder": p.shoulder, "torso_length": p.torso_length,
-        "armhole_depth": p.armhole_depth, "sleeve_length": p.sleeve_length, "ease": p.ease,
-    }
+def cmd_build(args: argparse.Namespace) -> int:
+    try:
+        files = iter_yaml_files(args.inputs)
+    except MeasurementError as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        return 2
+
+    if not files:
+        print("error: no YAML files found", file=sys.stderr)
+        return 2
+
+    out_dir = Path(args.outdir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    formats = [f.strip().lower() for f in args.formats.split(",") if f.strip()]
+    invalid = set(formats) - {"json", "pdf"}
+    if invalid:
+        print(
+            "error: unknown format(s): %s" % ", ".join(sorted(invalid)),
+            file=sys.stderr,
+        )
+        return 2
+
+    print("Drafting %d file(s) into %s" % (len(files), out_dir))
+    ok = 0
+    for yaml_path in files:
+        print("- %s" % yaml_path)
+        try:
+            result = process_file(yaml_path, out_dir, formats)
+        except MeasurementError as exc:
+            print("  ! %s" % exc)
+            continue
+        except OpenPatternMissing as exc:
+            print("error: %s" % exc, file=sys.stderr)
+            return 3
+        _print_result(result)
+        ok += 1
+
+    print("\nDone: %d/%d succeeded." % (ok, len(files)))
+    return 0 if ok == len(files) else 1
 
 
-def tab_generate():
-    st.header("Generate Pattern")
+def cmd_check(args: argparse.Namespace) -> int:
+    try:
+        files = iter_yaml_files(args.inputs)
+    except MeasurementError as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        return 2
 
-    profiles = _load_profiles_cached()
-    if not profiles:
-        st.warning("No test profiles found in config/test_profiles.json")
-        return
-
-    profile_ids = [p.profile_id for p in profiles]
-    selected_id = st.selectbox("Select measurement profile", profile_ids)
-    profile = next(p for p in profiles if p.profile_id == selected_id)
-
-    with st.expander("Profile measurements", expanded=False):
-        st.json(_profile_to_dict(profile))
-
-    design = st.selectbox("Select design", list(GENERATORS.keys()))
-    gen = GENERATORS[design]
-
-    if st.button("Generate"):
-        with st.spinner("Generating..."):
-            result = gen.generate(profile)
-            result = validate_pattern(result)
-
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            fig = render_preview(result)
-            st.plotly_chart(fig, use_container_width=True)
-        with col2:
-            st.subheader("Validation")
-            if result.valid:
-                st.success("PASS")
-            else:
-                for err in result.validation_errors:
-                    st.error(err)
-
-            st.subheader("Metadata")
-            st.json(result.metadata)
-
-        # Export
-        st.subheader("Export")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            json_str = json.dumps({
-                "design_id": result.design_id,
-                "points": {k: list(v) for k, v in result.points.items()},
-                "segments": result.segments,
-                "valid": result.valid,
-                "validation_errors": result.validation_errors,
-                "metadata": result.metadata,
-            }, indent=2)
-            st.download_button("Download JSON", json_str, file_name=f"{result.design_id}.json")
-        with col_b:
-            dxf_path = Path("outputs/patterns") / f"{result.design_id}.dxf"
-            if export_dxf(result, dxf_path):
-                st.download_button("Download DXF", dxf_path.read_bytes(), file_name=f"{result.design_id}.dxf")
-            else:
-                st.info("DXF export requires ezdxf")
-
-
-def tab_compare():
-    st.header("Compare Designs")
-
-    profiles = _load_profiles_cached()
-    if not profiles:
-        st.warning("No test profiles found")
-        return
-
-    profile_ids = [p.profile_id for p in profiles]
-    selected_id = st.selectbox("Select measurement profile", profile_ids, key="cmp_profile")
-    profile = next(p for p in profiles if p.profile_id == selected_id)
-
-    results = {}
-    for name, gen in GENERATORS.items():
-        r = gen.generate(profile)
-        r = validate_pattern(r)
-        results[name] = r
-
-    cols = st.columns(3)
-    for i, (name, r) in enumerate(results.items()):
-        with cols[i]:
-            st.subheader(name)
-            fig = render_preview(r)
-            st.plotly_chart(fig, use_container_width=True)
-            if r.valid:
-                st.success("Valid")
-            else:
-                st.warning(f"{len(r.validation_errors)} errors")
-
-    # Summary table
-    rows = []
-    for name, r in results.items():
-        rows.append({
-            "Design": name,
-            "Valid": r.valid,
-            "Errors": len(r.validation_errors),
-            "Points": len(r.points),
-            "Segments": len(r.segments),
-        })
-    st.dataframe(pd.DataFrame(rows), hide_index=True)
-
-
-def tab_evaluate():
-    st.header("Evaluate")
-
-    if st.button("Run Evaluation"):
-        with st.spinner("Running code analysis..."):
-            code_met = measure_code_metrics(DESIGN_PATHS)
-
-        st.subheader("Raw Constraint Values")
-
-        out_path = Path("outputs/raw/raw_constraint_values.csv")
-        if out_path.exists():
-            raw_df = pd.read_csv(out_path, index_col=0)
-            st.dataframe(raw_df, use_container_width=True)
+    status = 0
+    for yaml_path in files:
+        try:
+            config = load_measurement_file(yaml_path)
+            validate_measurement_file(config)
+        except MeasurementError as exc:
+            print("FAIL %s\n  %s" % (yaml_path, exc))
+            status = 1
         else:
-            st.info("Evaluation did not produce output. Check logs.")
-
-        st.subheader("Code Metrics Detail")
-        st.dataframe(pd.DataFrame(code_met), hide_index=True)
+            print("OK   %s" % yaml_path)
+    return status
 
 
-tabs = st.tabs(["Generate", "Compare", "Evaluate"])
+def cmd_templates(args: argparse.Namespace) -> int:
+    for name, spec in sorted(TEMPLATES.items()):
+        styles = sorted({style for (style, _) in spec["requirements"]})
+        print("%s — %s" % (name, spec["description"]))
+        print(
+            "    class=%s default=%s/%s styles=%s"
+            % (
+                spec["op_class"],
+                spec["default_gender"],
+                spec["default_style"],
+                ", ".join(styles),
+            )
+        )
+        if spec["one_of"]:
+            for group in spec["one_of"]:
+                print("    needs one of: %s" % ", ".join(group))
+    return 0
 
-with tabs[0]:
-    tab_generate()
-with tabs[1]:
-    tab_compare()
-with tabs[2]:
-    tab_evaluate()
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="app.py",
+        description="Draft sewing patterns from YAML measurements with OpenPattern.",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    build = sub.add_parser("build", help="draft pattern(s) and export JSON/PDF")
+    build.add_argument(
+        "inputs",
+        nargs="+",
+        help="YAML measurement file(s) or directories containing them",
+    )
+    build.add_argument(
+        "-o",
+        "--outdir",
+        default=DEFAULT_OUTDIR,
+        help="output directory (default: %s)" % DEFAULT_OUTDIR,
+    )
+    build.add_argument(
+        "--formats",
+        default=DEFAULT_FORMATS,
+        help="comma separated list of json,pdf (default: %s)" % DEFAULT_FORMATS,
+    )
+    build.set_defaults(func=cmd_build)
+
+    check = sub.add_parser("check", help="validate YAML file(s) only")
+    check.add_argument("inputs", nargs="+", help="YAML file(s) or directories")
+    check.set_defaults(func=cmd_check)
+
+    templates = sub.add_parser("templates", help="list supported base templates")
+    templates.set_defaults(func=cmd_templates)
+
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

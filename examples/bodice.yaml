@@ -1,0 +1,51 @@
+# Example measurement file: basic bodice block
+#
+# Drafts a women's basic bodice with the Gilewska method, including the
+# optional bust and waist darts.  Values come from a standard European
+# French size 36 (OpenPattern size code W36G) and are expressed in cm.
+#
+# Measurement names are the native OpenPattern (French) keys.  The English
+# gloss after each name is only a comment for readability.
+#
+#   python app.py check examples/bodice.yaml
+#   python app.py build examples/bodice.yaml
+
+template: bodice
+style: Gilewska      # Gilewska | Donnanno | Chiappetta
+gender: w            # w = woman, m = man
+profile_name: bodice_gilewska_w36
+ease: 8              # wearing ease in cm
+darts: true          # add bust + waist darts
+
+measurements:
+  # --- circumference / width ---
+  tour_poitrine: 84.0            # bust circumference
+  tour_taille: 62.0              # waist circumference
+  tour_bassin: 88.0              # hip circumference
+  tour_encolure: 36.0            # neck circumference
+  tour_bras: 27.0                # upper-arm circumference
+  tour_poignet: 15.75            # wrist circumference
+  carrure_dos: 35.0              # back shoulder width
+  carrure_devant: 33.5           # front shoulder width
+  largeur_encolure: 6.0          # neck width
+  ecart_poitrine: 19.0           # bust point separation
+
+  # --- heights / depths ---
+  hauteur_carrure: 6.833         # shoulder slope drop
+  hauteur_emmanchure: 21.75      # armhole height
+  hauteur_poitrine: 26.0         # bust height
+  hauteur_bassin: 19.5           # hip depth
+  hauteur_coude: 35.0            # elbow height
+  profondeur_emmanchure: 16.925  # armhole depth
+  profondeur_encolure_devant: 8.0
+  profondeur_encolure_dos: 2.25
+
+  # --- lengths ---
+  longueur_devant: 44.8          # front length
+  longueur_dos: 41.5             # back length
+  longueur_epaule: 13.6          # shoulder length
+  longueur_manche: 59.0          # sleeve length
+  longueur_col_devant: 11.4      # front neck length
+  longueur_col_dos: 6.8          # back neck length
+  longueur_emmanchure_devant: 19.166  # front armhole length
+  longueur_emmanchure_dos: 16.75      # back armhole length

@@ -1,92 +1,214 @@
-# Vision2DXF — Skeletal Design-Comparison Prototype
+# pattern_drafter
 
-A local Streamlit application that demonstrates three distinct garment pattern-generation strategies and produces preliminary measured values for sensitivity analysis.
+Draft 1:1 sewing patterns from a simple **YAML measurement file** using the
+[OpenPattern](https://github.com/fmetivier/OpenPattern) library, then export
+the result as:
 
-## Quick Start
+- a structured **JSON** description (panels, vertices, construction points,
+  bounds) that other tools can consume, and
+- a visual **PDF** rendering of the drafted pattern for inspection or printing.
+
+Three base templates are supported out of the box: **bodice**, **skirt** and
+**trousers**, all through a single command line interface (`app.py`).
+
+```
+examples/*.yaml ──▶ pattern_drafter ──▶ outputs/*.json
+                          │                    outputs/*.pdf
+                          └── OpenPattern (drafting math)
+```
+
+## Installation
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-streamlit run app.py
 ```
 
-## What This Does
+`OpenPattern` is not on PyPI, so `requirements.txt` installs it from its Git
+repository. It depends on `matplotlib`, `numpy` and `scipy` and is licensed
+under **GPL-3.0**; make sure that license is acceptable for your use.
 
-Runs three structurally different front-bodice pattern generators through one shared interface, then evaluates and compares them:
+Only the measurement parsing / validation code (`pattern_drafter.measurements`,
+`app.py check` and `app.py templates`) works without OpenPattern installed.
+Actually drafting a pattern (`app.py build`) requires the full stack above.
 
-| Design | Strategy |
-|--------|----------|
-| **A — Formula-Based** | Computes landmarks from body measurements using explicit equations |
-| **B — Parametric Block** | Transforms one master medium base block by ratio |
-| **C — Template Grading** | Selects closest of three discrete templates, applies bounded grading |
-
-## Repository Layout
-
-```
-vision2dxf/
-├── app.py                          # Streamlit app (4 tabs)
-├── config/                         # Criteria, evaluation settings, test profiles
-├── data/                           # Prototype data (all status: prototype_only)
-│   ├── drafting/formula_parameters.yaml
-│   ├── base_blocks/bodice_medium.json
-│   ├── templates/{small,medium,large}.json
-│   └── usability/sus_responses.csv
-├── src/vision2dxf/
-│   ├── core/                       # Shared models, validation, preview, export
-│   ├── designs/                    # Three design packages (structurally distinct)
-│   ├── evaluation/                 # Benchmark, reliability, code metrics
-│   └── sensitivity/                # Normalize, weights, score, summarize
-├── scripts/                        # CLI entry points
-├── tests/                          # pytest suite
-└── outputs/                        # Generated CSVs and JSONs
-```
-
-## Commands
+## Quick start
 
 ```bash
-# Run the app
-streamlit run app.py
+# List the supported base templates and their available styles
+python app.py templates
 
-# Run tests
-pytest -v
+# Validate the example measurement files without drafting
+python app.py check examples
 
-# Run full evaluation (benchmark + reliability + code metrics)
-python scripts/run_evaluation.py
-
-# Run sensitivity analysis (normalization + 120 LOI scenarios)
-python scripts/run_sensitivity.py
-
-# Run everything
-python scripts/run_all.py
+# Draft the examples: writes outputs/<profile_name>.json and .pdf
+python app.py build examples
 ```
 
-## Evaluation Metrics
+## Command line reference
 
-| Criterion | Metric | Source | Direction |
-|-----------|--------|--------|-----------|
-| Economic | Halstead Program Volume | Radon | minimize |
-| Performance | Median generation time (ms) | benchmark | minimize |
-| Reliability | Failure rate (%) | test suite | minimize |
-| Maintainability | Maintainability Index | Radon | maximize |
-| Usability | Mean SUS score | participants | maximize (pending) |
+| Command | Description |
+|---------|-------------|
+| `python app.py templates` | List supported templates, styles and required length alternatives. |
+| `python app.py check FILE...` | Parse and validate YAML files only. No OpenPattern needed. |
+| `python app.py build FILE...` | Draft and export. Accepts files and/or directories. |
 
-## Sensitivity Analysis
+`build` options:
 
-- Normalizes all criteria to a 1–10 scale (10 = favorable)
-- Generates all 120 permutations of LOI [10, 9, 8, 7, 6]
-- Reports win counts, mean rank, score range, and ties
-- Blocks final recommendation when SUS data is missing
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-o`, `--outdir` | `outputs` | Directory for the generated `.json` / `.pdf` files. |
+| `--formats` | `json,pdf` | Comma separated list of `json`, `pdf` or both. |
 
-## Data Status
+Exit codes: `0` success, `1` some files failed, `2` bad arguments / no files,
+`3` OpenPattern (or another drafting dependency) is not installed.
 
-All data files are `prototype_only` and not validated anthropometric data. Every value includes source, status, and units metadata.
+## YAML measurement file
 
-## Definition of Done
+Each file describes one pattern profile:
 
-- [x] App launches with one command
-- [x] All three designs generate a 2D pattern through one interface
-- [x] Algorithms are structurally distinct
-- [x] Shared code not duplicated inside design packages
-- [x] Preliminary automated metrics from actual executions
-- [x] Sensitivity module reproduces 1–10 normalization and 120 LOI permutations
-- [x] Missing SUS prevents final five-criterion winner
-- [x] No fabricated measurements or validation results
+```yaml
+template: bodice        # bodice | skirt | trousers
+style: Gilewska         # Gilewska | Donnanno | Chiappetta (template dependent)
+gender: w               # w = woman, m = man
+profile_name: my_bodice # used for the output file names
+ease: 8                 # optional wearing ease in cm
+darts: true             # optional: add bust + waist darts (bodice)
+
+measurements:           # native OpenPattern (French) keys, values in cm
+  tour_poitrine: 84.0
+  tour_taille: 62.0
+  # ...
+```
+
+Defaults when omitted: `style` and `gender` fall back to the template default,
+`profile_name` falls back to the file name, `ease` defaults to `8` and `darts`
+to `false`.
+
+Copy [`examples/bodice.yaml`](examples/bodice.yaml),
+[`examples/skirt.yaml`](examples/skirt.yaml) or
+[`examples/trousers.yaml`](examples/trousers.yaml) to get started.
+
+### Templates
+
+| Template | OpenPattern class | Default style / gender | Styles |
+|----------|-------------------|------------------------|--------|
+| `bodice` | `Basic_Bodice` | `Gilewska` / `w` | Gilewska, Donnanno, Chiappetta |
+| `skirt` | `Basic_Skirt` | `Gilewska` / `w` | Gilewska, Donnanno, Chiappetta |
+| `trousers` | `Basic_Trousers` | `Donnanno` / `m` | Donnanno |
+
+Trousers additionally accept **one of** `longueur_tot`, `hauteur_taille_terre`,
+`longueur_taille_terre` or `entrejambe_terre` to define the total length.
+Validation reports exactly which measurements are missing for the chosen
+template/style/gender.
+
+### Measurement keys
+
+Values are the native (French) OpenPattern keys. The most common ones:
+
+| Key | Meaning |
+|-----|---------|
+| `tour_poitrine` | bust circumference |
+| `tour_taille` | waist circumference |
+| `tour_bassin` | hip circumference |
+| `tour_encolure` | neck circumference |
+| `tour_bras` | upper-arm circumference |
+| `tour_poignet` | wrist circumference |
+| `carrure_dos` / `carrure_devant` | back / front shoulder width |
+| `ecart_poitrine` | bust point separation |
+| `hauteur_poitrine` | bust height |
+| `hauteur_bassin` | hip depth |
+| `hauteur_taille_genou` | waist to knee length |
+| `longueur_dos` / `longueur_devant` | back / front length |
+| `longueur_epaule` | shoulder length |
+| `longueur_manche` | sleeve length |
+| `montant` | rise / crotch depth |
+
+The full glossary lives in
+[`pattern_drafter/measurements.py`](pattern_drafter/measurements.py)
+(`MEASUREMENT_GLOSSARY`).
+
+## Output
+
+For a profile named `bodice_gilewska_w36` the program writes:
+
+- `outputs/bodice_gilewska_w36.json`
+- `outputs/bodice_gilewska_w36.pdf`
+
+### JSON schema (v1.0)
+
+```jsonc
+{
+  "schema_version": "1.0",
+  "template": "bodice",
+  "style": "Gilewska",
+  "gender": "w",
+  "units": "cm",
+  "profile_name": "bodice_gilewska_w36",
+  "input_measurements":   { "tour_poitrine": 84.0, "...": 0 },
+  "resolved_measurements": { "...": 0 },   // incl. values computed by OpenPattern
+  "panels": [
+    { "name": "front", "closed": true, "vertices": [[x, y], "..."] },
+    { "name": "back",  "closed": true, "vertices": [[x, y], "..."] },
+    { "name": "sleeve","closed": true, "vertices": [[x, y], "..."] }
+  ],
+  "points": {
+    "front": { "points": { "WF": [x, y] }, "curves": { "Front_Sleeve": [[x, y]] } },
+    "back":  { "points": { "...": [x, y] }, "curves": {} }
+  },
+  "bounds": { "xmin": 0.0, "xmax": 0.0, "ymin": 0.0, "ymax": 0.0 },
+  "metadata": {
+    "generator": "pattern_drafter",
+    "openpattern_class": "Basic_Bodice",
+    "openpattern_version": "1.0",
+    "source_yaml": "examples/bodice.yaml",
+    "generated_at": "2026-10-11T00:00:00+00:00"
+  }
+}
+```
+
+All coordinates are in centimetres. Each entry in `panels` is a closed polygon;
+`points` holds the named construction points and any spline curves per piece.
+
+### PDF
+
+The PDF is rendered through OpenPattern's own matplotlib drawing routines at
+1:1 scale (1 unit = 1 cm) and includes the point labels, fold/grain lines,
+waist/bust/hip guide lines and a 5 cm scale bar.
+
+## Repository layout
+
+```
+.
+├── app.py                         # CLI entry point
+├── pattern_drafter/
+│   ├── measurements.py            # YAML parsing, validation, sqlite bridge
+│   ├── drafting.py                # OpenPattern integration + geometry extraction
+│   ├── export.py                  # JSON + PDF writers
+│   └── pipeline.py                # orchestration used by app.py and tests
+├── examples/
+│   ├── bodice.yaml
+│   ├── skirt.yaml
+│   └── trousers.yaml
+└── tests/                         # pytest suite
+```
+
+## Development
+
+```bash
+# Run the test suite
+pytest -q
+
+# The measurement / export tests run without OpenPattern; drafting tests are
+# skipped automatically when the library is unavailable.
+```
+
+## Limitations
+
+- Drafts use OpenPattern's base blocks; no seam allowance, hem allowance or
+  final sizing is applied.
+- Measurements are in centimetres; the native OpenPattern keys are used as-is.
+- Trousers are only implemented for the Donnanno style upstream.
+- Bodice darts (`darts: true`) call OpenPattern's `add_bust_dart` /
+  `add_waist_dart`; leave `darts: false` for the plain block.
