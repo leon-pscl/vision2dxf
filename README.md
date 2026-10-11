@@ -4,7 +4,7 @@ Local web app that turns a front photo plus at least one side photo into
 GarmentCode body parameters, using silhouette geometry only — no machine-learned
 measurement model. Full specification: [docs/AGENT_BRIEF.md](docs/AGENT_BRIEF.md).
 
-**Status: complete for v1 (M0-M6 and the M4b bench).** YOLO26 segmentation and pose, the
+**Status: complete for version 1 (M0-M6 and the M4b bench).** YOLO26 segmentation and pose, the
 pose gate, landmark search, the 26 GarmentCode keys, the capture and review
 pages, and the bench against the five GarmentCode reference bodies. The image
 scale is the subject's measured height, so there is no station calibration and no
