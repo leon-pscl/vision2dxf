@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { Button, Callout } from '../components/ui'
 import { api, RequestError, saveJson, type GenerationPayload } from '../api'
-import type { GenerateResponse, Settings } from '../types'
+import type { Settings, TransformResponse } from '../types'
 
 const FILES = [
-  { path: '/api/patterns/export/bundle', name: 'pattern-bundle.zip', label: 'Everything (zip)', note: 'all files' },
+  { path: '/api/patterns/export/bundle', name: 'pattern-bundle.zip', label: 'Everything (zip)', note: 'every file below, plus the base block and its derived maps' },
   { path: '/api/patterns/export/pdf', name: 'pattern-a0.pdf', label: 'pattern-a0.pdf', note: 'full scale, A0' },
   { path: '/api/patterns/export/dxf', name: 'pattern.dxf', label: 'pattern.dxf', note: 'full scale, mm' },
-  { path: '/api/patterns/export/svg', name: 'pattern-preview.svg', label: 'pattern-preview.svg', note: 'same geometry as the exports' },
+  { path: '/api/patterns/export/svg', name: 'base-vs-target-preview.svg', label: 'base-vs-target-preview.svg', note: 'the comparison, same geometry as the exports' },
 ]
 
 export function ExportView({
@@ -15,7 +15,7 @@ export function ExportView({
   input,
   settings,
 }: {
-  result: GenerateResponse
+  result: TransformResponse
   input: GenerationPayload
   settings: Settings
 }) {
@@ -66,9 +66,16 @@ export function ExportView({
         <div className="export-card">
           <div>
             <strong>generation-manifest.json</strong>
-            <small>method, settings, assumptions, rule traces</small>
+            <small>base block, its version and hash, the configuration and every difference</small>
           </div>
           <Button disabled={busy !== null} onClick={() => saveJson('generation-manifest.json', result.trace)}>Download</Button>
+        </div>
+        <div className="export-card">
+          <div>
+            <strong>transformation-diagnostics.json</strong>
+            <small>solver, landmark targets, seam balancing, achieved dimensions</small>
+          </div>
+          <Button disabled={busy !== null} onClick={() => saveJson('transformation-diagnostics.json', result.diagnostics)}>Download</Button>
         </div>
         <div className="export-card">
           <div>
@@ -81,11 +88,22 @@ export function ExportView({
 
       {error ? <Callout tone="error">{error}</Callout> : null}
 
+      <Callout tone="info" title="What identifies this pattern">
+        <p>
+          Base block <code>{result.trace.base_block.id}</code> v{result.trace.base_block.version},
+          derived from template <code>{result.trace.base_block.source_file}</code> pinned at sha256{' '}
+          {result.trace.base_block.source_sha256.slice(0, 16)}…, transformed with configuration v
+          {result.trace.transformation_config.version} and influence map v
+          {result.trace.transformation_config.influence_map_version}. All of it is recorded in the
+          manifest.
+        </p>
+      </Callout>
+
       <Callout tone="info" title="Fixture-compatible defaults">
         <p>
-          The panel-local geometry and the <code>center</code> placement follow the reference file. Values the
-          fixture cannot explain are preserved verbatim and documented in the manifest:{' '}
-          <code>{JSON.stringify(result.trace.fixtureDefaults)}</code>
+          Panel-local geometry and the <code>center</code> placement follow the reference file. Values
+          the fixture cannot explain are preserved verbatim and documented in the manifest:{' '}
+          <code>{JSON.stringify(result.trace.fixture_defaults)}</code>
         </p>
       </Callout>
     </div>

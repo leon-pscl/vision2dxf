@@ -9,8 +9,8 @@ from reportlab.pdfgen import canvas as rl_canvas
 
 from ..config import drafting_config
 from ..drafting.cutting import CuttingLine
-from ..drafting.geometry import PatternDocument
-from ..drafting.panels import world_point
+from ..drafting.geometry import PatternDocument, world_point
+
 
 DASH_CUTTING = (12, 5)
 DASH_CONSTRUCTION = (8, 3, 1.5, 3)

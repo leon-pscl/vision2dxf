@@ -194,10 +194,11 @@ def validate(doc: PatternDocument, cutting: dict[str, CuttingLine] | None = None
     bad_params: list[str] = []
     for pair in doc.stitches:
         for rec in pair.records:
-            if doc.edge_by_id(rec.edge_id) is None:
-                missing_refs.append(rec.edge_id)
-            if not (0.0 <= rec.param_start <= 1.0 and 0.0 <= rec.param_end <= 1.0):
-                bad_params.append(rec.edge_id)
+            for edge_id in rec.edge_ids:
+                if doc.edge_by_id(edge_id) is None:
+                    missing_refs.append(edge_id)
+            if not (0.0 <= rec.start_param <= 1.0 and 0.0 <= rec.end_param <= 1.0):
+                bad_params.append(rec.start_edge_id)
     checks.append(
         CheckResult(
             "stitch_references", "fail" if missing_refs else "pass", CRITICAL,
@@ -219,9 +220,12 @@ def validate(doc: PatternDocument, cutting: dict[str, CuttingLine] | None = None
     for pair in doc.stitches:
         lengths = []
         for rec in pair.records:
-            found = doc.edge_by_id(rec.edge_id)
+            found = doc.edge_by_id(rec.start_edge_id)
             if found:
-                lengths.append(found[1].length_mm * rec.length_param)
+                # The seam may cross a corner, so measure along the boundary it covers.
+                length = found[0].seam_length_mm(rec)
+                if length is not None:
+                    lengths.append(length)
         if len(lengths) == 2:
             diff = abs(lengths[0] - lengths[1])
             allowed = max(tol["seam_mismatch_abs_mm"], tol["seam_mismatch_rel"] * max(lengths))

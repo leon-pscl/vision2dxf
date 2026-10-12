@@ -21,6 +21,11 @@ def drafting_config() -> dict:
     return _load("drafting.yaml")
 
 
+def transformation_config() -> dict:
+    """Weights, solver limits, envelope and influence map for the base-block transform."""
+    return _load("transformation.yaml")
+
+
 def measurement_dictionary() -> dict:
     return _load("measurements.yaml")
 

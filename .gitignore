@@ -7,3 +7,6 @@ backend/app/static/
 dist/
 *.zip
 .DS_Store
+# The full GarmageSet library is too large to version; the templates the base-block
+# catalog pins are committed under assets/base-blocks/templates instead.
+/templates/

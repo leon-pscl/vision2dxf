@@ -3,9 +3,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: formula-drafting:1.0.0
+    image: base-block-transform:2.0.0
     ports:
       - "${PORT:-8000}:8000"
     environment:
       - TZ=UTC
+    volumes:
+      # Optional: the full GarmageSet library, needed only to select a template the
+      # base-block catalog does not list. The catalogued blocks ship in the image.
+      - ./templates:/srv/templates:ro
     restart: unless-stopped

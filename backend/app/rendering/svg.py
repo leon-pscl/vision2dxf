@@ -6,13 +6,16 @@ from xml.sax.saxutils import escape
 
 from ..config import drafting_config
 from ..drafting.cutting import CuttingLine
-from ..drafting.geometry import PatternDocument, PatternEdge, Point2D
-from ..drafting.panels import world_point
+from ..drafting.geometry import PatternDocument, PatternEdge, Point2D, world_point
+
 
 VIEW_LAYERS = (
-    "construction", "landmarks", "controls", "sewing", "cutting", "darts",
-    "notches", "labels", "rulers",
+    "base", "displacement", "heatmap", "construction", "landmarks", "controls", "sewing",
+    "cutting", "darts", "notches", "labels", "rulers",
 )
+
+# Layers that only exist when a base block is supplied for comparison.
+COMPARISON_LAYERS = ("base", "displacement", "heatmap")
 
 STYLES = """
 :root { color-scheme: light dark; }
@@ -35,6 +38,14 @@ STYLES = """
 .scalebar { stroke: var(--ruler, #a16207); stroke-width: 2; fill: none; }
 .scaletext { fill: var(--ruler, #a16207); stroke: none; font: 600 11px ui-monospace, monospace; }
 .title { fill: var(--label, #111827); stroke: none; font: 600 14px ui-sans-serif, system-ui, sans-serif; }
+/* Comparison: the base block is muted, the transformed block keeps the primary style. */
+.base-sewing { fill: none; stroke: var(--base, #9ca3af); stroke-width: 1.4; stroke-dasharray: 7 5; opacity: .85; }
+.base-dart { fill: none; stroke: var(--base, #9ca3af); stroke-width: 1; stroke-dasharray: 4 4; opacity: .8; }
+.base-landmark { fill: none; stroke: var(--base, #9ca3af); stroke-width: 1; }
+.displacement { fill: none; stroke: var(--displacement, #db2777); stroke-width: 1.4; }
+.displacement-head { fill: var(--displacement, #db2777); stroke: none; }
+.displacement-text { fill: var(--displacement, #db2777); stroke: none; font: 600 10px ui-monospace, monospace; }
+.heat { stroke: none; opacity: .5; }
 """.strip()
 
 
@@ -86,18 +97,34 @@ def document_extent(doc: PatternDocument, options: RenderOptions) -> tuple[float
     return min(xs) - m, min(ys) - m, max(xs) + m, max(ys) + m
 
 
-def render_svg(doc: PatternDocument, cutting: dict[str, CuttingLine], options: RenderOptions | None = None) -> str:
+def render_svg(
+    doc: PatternDocument,
+    cutting: dict[str, CuttingLine],
+    options: RenderOptions | None = None,
+    base: PatternDocument | None = None,
+) -> str:
     """Every layer is emitted into its own <g data-layer>, so the UI can toggle
-    visibility client-side without a round trip. One render, identical geometry."""
+    visibility client-side without a round trip. One render, identical geometry.
+
+    With `base` supplied, the base block is drawn underneath in a muted style together
+    with per-landmark displacement vectors and a local deformation heat map. Both
+    documents share the base block frame, so the overlay is a true comparison and not two
+    drawings scaled to fit.
+    """
     options = options or RenderOptions()
     cfg = drafting_config()
     spacing = cfg["sample_spacing_mm"]
     x0, y0, x1, y1 = document_extent(doc, options)
+    if base is not None:
+        bx0, by0, bx1, by1 = document_extent(base, options)
+        x0, y0, x1, y1 = min(x0, bx0), min(y0, by0), max(x1, bx1), max(y1, by1)
     width, height = x1 - x0, y1 - y0
 
     layers: dict[str, list[str]] = {name: [] for name in VIEW_LAYERS}
     if options.show_grid:
         layers["construction"].append(_grid(x0, y0, x1, y1))
+    if base is not None:
+        _comparison_layers(layers, base, doc, spacing)
 
     for panel in doc.panels:
         for a, b in panel.construction:
@@ -149,7 +176,8 @@ def render_svg(doc: PatternDocument, cutting: dict[str, CuttingLine], options: R
 
     theme = ('<style>:root{--bg:#0b0d10;--grid:#23262d;--sewing:#e5e7eb;--cutting:#f87171;'
              '--construction:#60a5fa;--handle:#c084fc;--label:#9ca3af;--notch:#2dd4bf;'
-             '--ruler:#fbbf24;--dartfill:#7f1d1d;}</style>') if options.dark else ""
+             '--ruler:#fbbf24;--dartfill:#7f1d1d;--base:#6b7280;--displacement:#f472b6;}'
+             '</style>') if options.dark else ""
 
     groups = "".join(
         f'<g data-layer="{name}"{"" if options.active(name) else " hidden"}>'
@@ -164,6 +192,86 @@ def render_svg(doc: PatternDocument, cutting: dict[str, CuttingLine], options: R
         f'preserveAspectRatio="xMidYMid meet">'
         f"<style>{STYLES}</style>{theme}{background}<g>{groups}</g></svg>"
     )
+
+
+def _comparison_layers(
+    layers: dict[str, list[str]],
+    base: PatternDocument,
+    target: PatternDocument,
+    spacing: float,
+) -> None:
+    """Muted base block, displacement vectors and a local deformation heat map."""
+    base_panels = {p.key: p for p in base.panels}
+    for panel in target.panels:
+        reference = base_panels.get(panel.key)
+        if reference is None:
+            continue
+
+        layers["base"].append(
+            f'<path class="base-sewing" '
+            f'd="{_path_d(reference.edges, reference, spacing, absolute_start=False)} Z"/>'
+        )
+        for dart in reference.darts:
+            for leg in dart.contours:
+                pts = [world_point(reference, p) for p in leg]
+                layers["base"].append(f'<path class="base-dart" d="{_closed(pts)}"/>')
+        for point in reference.landmarks.values():
+            wp = world_point(reference, point)
+            layers["base"].append(
+                f'<circle class="base-landmark" cx="{wp.x:.3f}" cy="{wp.y:.3f}" r="3.2"/>'
+            )
+
+        for role, point in reference.landmarks.items():
+            moved = panel.landmarks.get(role)
+            if moved is None:
+                continue
+            a = world_point(reference, point)
+            b = world_point(panel, moved)
+            distance = a.dist(b)
+            if distance < 0.1:
+                continue
+            layers["displacement"].append(_line(a, b, "displacement"))
+            layers["displacement"].append(_arrow_head(a, b))
+            mid = a.lerp(b, 0.5)
+            layers["displacement"].append(
+                f'<text class="displacement-text" x="{mid.x + 4:.2f}" y="{mid.y - 4:.2f}">'
+                f'{escape(role)} {distance:.1f}</text>'
+            )
+
+        # Heat map: one disc per boundary sample, radius scaled by how far that point
+        # of the base boundary travelled.
+        for base_edge, edge in zip(reference.edges, panel.edges):
+            base_points = base_edge.polyline(spacing * 4)
+            points = edge.polyline(spacing * 4)
+            for p, q in zip(base_points, points):
+                distance = p.dist(q)
+                if distance < 0.5:
+                    continue
+                wp = world_point(panel, q)
+                layers["heatmap"].append(
+                    f'<circle class="heat" cx="{wp.x:.2f}" cy="{wp.y:.2f}" '
+                    f'r="{min(9.0, 1.2 + distance * 0.22):.2f}" fill="{_heat_color(distance)}"/>'
+                )
+
+
+def _heat_color(distance_mm: float, full_scale_mm: float = 40.0) -> str:
+    """Muted blue (small) to warm red (large); readable in both themes."""
+    t = max(0.0, min(1.0, distance_mm / full_scale_mm))
+    r = int(60 + 180 * t)
+    g = int(130 - 70 * t)
+    b = int(220 - 170 * t)
+    return f"rgb({r},{g},{b})"
+
+
+def _arrow_head(a: Point2D, b: Point2D, size: float = 5.0) -> str:
+    dx, dy = b.x - a.x, b.y - a.y
+    length = max(1e-9, (dx * dx + dy * dy) ** 0.5)
+    ux, uy = dx / length, dy / length
+    nx, ny = uy, -ux
+    tip = b
+    left = Point2D(b.x - size * ux + size * 0.45 * nx, b.y - size * uy + size * 0.45 * ny)
+    right = Point2D(b.x - size * ux - size * 0.45 * nx, b.y - size * uy - size * 0.45 * ny)
+    return f'<polygon class="displacement-head" points="{_poly([tip, left, right])}"/>'
 
 
 def _closed(points: list[Point2D]) -> str:

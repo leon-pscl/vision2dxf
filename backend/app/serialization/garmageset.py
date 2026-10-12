@@ -17,6 +17,15 @@ CONTINUITY_EPS = 1e-6
 
 
 def edge_control_points(edge: PatternEdge, spacing_mm: float) -> list[list[float]]:
+    """The points the schema stores for one edge.
+
+    An edge that already holds a control polyline - which is what a block loaded from a
+    template carries - is written out as it stands, point for point. Writing only its
+    two ends would throw the curve away. A cubic is sampled; a straight segment is its
+    two endpoints.
+    """
+    if len(edge.points) >= 2:
+        return [p.as_triple() for p in edge.points]
     if edge.curve is None:
         return [edge.start.as_triple(), edge.end.as_triple()]
     return [p.as_triple() for p in edge.curve.sample(spacing_mm)]
@@ -76,8 +85,10 @@ def serialize(doc: PatternDocument) -> GarmageSet:
         StitchPair(
             records=[
                 StitchRecord(
-                    start=EdgeRef(clothPieceId=r.panel_id, edgeId=r.edge_id, param=round(r.param_start, 8)),
-                    end=EdgeRef(clothPieceId=r.panel_id, edgeId=r.edge_id, param=round(r.param_end, 8)),
+                    start=EdgeRef(clothPieceId=r.panel_id, edgeId=r.start_edge_id,
+                                  param=round(r.start_param, 8)),
+                    end=EdgeRef(clothPieceId=r.panel_id, edgeId=r.end_edge_id,
+                                param=round(r.end_param, 8)),
                     isCounterClockWise=r.is_counter_clockwise,
                 )
                 for r in pair.records

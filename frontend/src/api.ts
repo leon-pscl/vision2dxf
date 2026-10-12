@@ -1,4 +1,15 @@
-import type { ApiError, AppConfig, GenerateResponse, Preview, Review, Settings, ValidationReport } from './types'
+import type {
+  ApiError,
+  AppConfig,
+  BaseBlockCatalog,
+  BaseBlockDetail,
+  DeltaResponse,
+  Preview,
+  Review,
+  Settings,
+  TransformResponse,
+  ValidationReport,
+} from './types'
 
 export class RequestError extends Error {
   code: string
@@ -48,8 +59,25 @@ export const api = {
   report: (input: GenerationPayload) =>
     post<{ can_generate: boolean; blocking: unknown[] }>('/api/measurements/report', payload(input)),
 
-  generate: (input: GenerationPayload, settings: Settings) =>
-    post<GenerateResponse>('/api/patterns/generate', payload(input, settings)),
+  baseBlocks: () => fetch('/api/base-blocks').then((r) => r.json() as Promise<BaseBlockCatalog>),
+
+  baseBlock: (blockId: string) =>
+    fetch(`/api/base-blocks/${encodeURIComponent(blockId)}`).then(async (r) => {
+      const data = await r.json()
+      if (!r.ok) throw new RequestError(data?.error ?? { code: 'base_block_unavailable', message: 'The base block could not be loaded', details: [] })
+      return data as BaseBlockDetail
+    }),
+
+  validateBaseBlock: (blockId: string) =>
+    post<ValidationReport & { ok: boolean; blockId: string }>(
+      `/api/base-blocks/${encodeURIComponent(blockId)}/validate`, {},
+    ),
+
+  deltas: (input: GenerationPayload, settings: Settings) =>
+    post<DeltaResponse>('/api/base-block/deltas', payload(input, settings)),
+
+  transform: (input: GenerationPayload, settings: Settings) =>
+    post<TransformResponse>('/api/patterns/transform', payload(input, settings)),
 
   validatePattern: (pattern: unknown) =>
     post<{ ok: boolean; issues: { check: string; message: string }[] }>('/api/patterns/validate', { pattern }),
@@ -165,4 +193,4 @@ export type SemanticsResponse = {
   draftingMeasurements: Record<string, number | null> | null
 }
 
-export type { AppConfig, GenerateResponse, Preview, Review, Settings, ValidationReport }
+export type { AppConfig, Preview, Review, Settings, TransformResponse, ValidationReport }

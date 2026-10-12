@@ -1,4 +1,4 @@
-"""HTTP contract: the semantics gate, generation, exports, structured errors."""
+"""HTTP contract: the semantics gate, the envelope gate, transformation, exports, errors."""
 from __future__ import annotations
 
 import io
@@ -20,20 +20,26 @@ def yaml_ok():
 
 
 @pytest.fixture(scope="module")
+def yaml_target():
+    return yaml_text("body_measurements_target_a.yaml")
+
+
+@pytest.fixture(scope="module")
 def yaml_pascual():
     return yaml_text("body_measurements_pascual.yaml")
 
 
 @pytest.fixture(scope="module")
-def confirmations(default_confirmations):
-    return default_confirmations
+def confirmations(base_confirmations):
+    """The interpretations the base block was measured with."""
+    return base_confirmations
 
 
 @pytest.fixture(scope="module")
-def generated(yaml_ok, confirmations):
-    response = client.post("/api/patterns/generate",
-                           json={"yamlText": yaml_ok, "confirmations": confirmations})
-    assert response.status_code == 200
+def generated(yaml_target, confirmations):
+    response = client.post("/api/patterns/transform",
+                           json={"yamlText": yaml_target, "confirmations": confirmations})
+    assert response.status_code == 200, response.text
     return response.json()
 
 
@@ -44,6 +50,15 @@ def test_validate_measurements_returns_every_value(yaml_ok):
                        json={"filename": "body.yaml", "content": yaml_ok}).json()
     assert data["ok"] and len(data["rows"]) == 26
     assert data["rows"][0]["interpretation"]
+
+
+def test_both_supplied_fixtures_load_and_display(yaml_ok, yaml_pascual):
+    """Both supplied profiles import and show every value, whatever happens later."""
+    for content in (yaml_ok, yaml_pascual):
+        data = client.post("/api/measurements/validate",
+                           json={"filename": "body.yaml", "content": content}).json()
+        assert data["ok"] and len(data["rows"]) == 26
+        assert all(row["valueMm"] == pytest.approx(row["value"] * 10.0) for row in data["rows"])
 
 
 def test_validate_measurements_reports_field_errors():
@@ -93,6 +108,16 @@ def test_semantics_records_original_and_normalized(yaml_ok, confirmations):
     assert bust["definitionVersion"]
 
 
+def test_the_second_fixture_displays_its_blocking_reason(yaml_pascual, confirmations):
+    """It loads and displays; it cannot be transformed, and the screen says why."""
+    data = client.post("/api/measurements/semantics",
+                       json={"yamlText": yaml_pascual, "confirmations": confirmations}).json()
+    assert data["source"]["canGenerate"] is False
+    fields = {b["field"] for b in data["source"]["blocking"]}
+    assert {"bust_line", "waist_line"} <= fields
+    assert all(b["message"] and b["suggestedAction"] for b in data["source"]["blocking"])
+
+
 def test_mixed_origins_are_a_blocking_schema_message(yaml_ok, confirmations):
     response = client.post("/api/measurements/semantics", json={
         "yamlText": yaml_ok,
@@ -111,10 +136,97 @@ def test_measurement_report_download(yaml_ok, confirmations):
     assert json.loads(response.content)["can_generate"] is True
 
 
-# ---- step 5: the gate ------------------------------------------------------
+# ---- the base block --------------------------------------------------------
 
-def test_generate_is_blocked_until_fields_are_confirmed(yaml_ok):
-    response = client.post("/api/patterns/generate", json={"yamlText": yaml_ok})
+def test_the_catalog_lists_the_blocks_on_offer():
+    data = client.get("/api/base-blocks").json()
+    ids = [b["id"] for b in data["blocks"]]
+    assert ids == ["bodice-ref-a", "bodice-ref-b", "bodice-ref-c"]
+    assert data["default"] in ids
+    assert data["reference"]["profile"]
+    assert all(b["validationStatus"] == "pass" for b in data["blocks"])
+    assert data["templateSelection"]["supported"] is True
+
+
+def test_base_block_endpoint_describes_one_block():
+    data = client.get("/api/base-blocks/bodice-ref-a").json()
+    assert data["id"] == "bodice-ref-a"
+    assert data["version"] and data["sourceFile"].endswith(".json")
+    assert data["sourceSha256"] and data["reviewed"] is True
+    assert data["validationStatus"] == "pass"
+    assert [p["key"] for p in data["panels"]] == ["front", "back"]
+    assert "<svg" in data["previewSvg"]
+    assert data["referenceMeasurementsMm"]["bust_circumference"] == 858.0
+    assert data["garmentDimensionsMm"]["bust_girth"] > 0
+    assert "Modifications" in data["provenance"]
+
+
+def test_base_block_publishes_its_derived_maps():
+    maps = client.get("/api/base-blocks/bodice-ref-a").json()["maps"]
+    assert set(maps) == {"landmarks", "edges", "seams", "darts", "grainlines"}
+    assert maps["landmarks"]["panels"]["front"]
+    assert maps["edges"]["panels"]["front"]["roles"][0]
+    assert maps["seams"]["pairs"]
+    assert maps["grainlines"]["panels"]["front"]["fromMm"]
+
+
+def test_any_template_can_be_selected_at_runtime():
+    source = client.get("/api/base-blocks/bodice-ref-b").json()["sourceFile"]
+    data = client.get("/api/base-blocks/template:" + source).json()
+    assert data["id"] == "template:" + source
+    assert data["reviewed"] is False
+    assert any(n["code"] == "block_not_reviewed" for n in data["notes"])
+
+
+def test_an_unknown_block_is_a_structured_404():
+    response = client.get("/api/base-blocks/nope")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "base_block_unavailable"
+
+
+def test_base_block_declares_its_semantic_vocabulary():
+    vocabulary = client.get("/api/base-blocks/bodice-ref-a").json()["semanticMap"]
+    assert "shoulder_tip" in vocabulary["pairedLandmarks"]
+    assert "center_neck" in vocabulary["centreLandmarks"]
+    assert {"hip_center", "hip_side", "dart_apex"} <= set(vocabulary["conditionalLandmarks"])
+    assert "side_seam" in vocabulary["pairedEdgeRoles"]
+    assert vocabulary["sides"] == ["left", "right"]
+
+
+@pytest.mark.parametrize("block_id", ["bodice-ref-a", "bodice-ref-b", "bodice-ref-c"])
+def test_base_block_validate_endpoint_runs_the_shared_validator(block_id):
+    data = client.post("/api/base-blocks/" + block_id + "/validate").json()
+    assert data["ok"] is True
+    assert data["status"] == "pass"
+    assert any(c["id"].startswith("base_landmark_roles") for c in data["checks"])
+    assert any(c["id"].startswith("self_intersection") for c in data["checks"])
+
+
+def test_deltas_endpoint_reports_differences_and_the_envelope(yaml_target, confirmations):
+    data = client.post("/api/base-block/deltas",
+                       json={"yamlText": yaml_target, "confirmations": confirmations}).json()
+    bust = next(d for d in data["deltas"] if d["name"] == "bust_circumference")
+    assert bust["baseValue"] == 858.0
+    assert bust["targetValue"] == 940.0
+    assert bust["deltaValue"] == pytest.approx(82.0)
+    assert bust["mapped"] is True
+    assert data["envelope"]["status"] == "ok"
+    assert data["influenceMap"]["version"]
+    assert data["referenceProfile"]["sourceFile"]
+    assert data["garmentDimensionsMm"]["bust_girth"] > 0
+    assert data["measurementDefinitions"]["bust_girth"]
+
+
+def test_deltas_endpoint_is_blocked_before_confirmation(yaml_target):
+    response = client.post("/api/base-block/deltas", json={"yamlText": yaml_target})
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "semantics_unresolved"
+
+
+# ---- the gates -------------------------------------------------------------
+
+def test_transform_is_blocked_until_fields_are_confirmed(yaml_ok):
+    response = client.post("/api/patterns/transform", json={"yamlText": yaml_ok})
     assert response.status_code == 409
     error = response.json()["error"]
     assert error["code"] == "semantics_unresolved"
@@ -122,69 +234,130 @@ def test_generate_is_blocked_until_fields_are_confirmed(yaml_ok):
     assert response.json()["semantics"]["canGenerate"] is False
 
 
-def test_generate_is_blocked_for_an_invalid_value(yaml_ok, confirmations):
-    response = client.post("/api/patterns/generate", json={
+def test_transform_is_blocked_for_an_invalid_value(yaml_ok, confirmations):
+    response = client.post("/api/patterns/transform", json={
         "yamlText": yaml_ok, "confirmations": confirmations, "corrections": {"bust": 900.0}})
     assert response.status_code == 409
     assert any(d["code"] == "INVALID" for d in response.json()["error"]["details"])
 
 
-def test_second_profile_is_rejected_by_the_schema(yaml_pascual, confirmations):
-    response = client.post("/api/patterns/generate",
+def test_transform_is_blocked_outside_the_envelope(yaml_ok, confirmations):
+    """A bust 25 cm from the base profile is past the tested range."""
+    response = client.post("/api/patterns/transform", json={
+        "yamlText": yaml_ok, "confirmations": confirmations, "corrections": {"bust": 111.0}})
+    assert response.status_code == 409
+    error = response.json()["error"]
+    assert error["code"] in ("envelope_confirmation_required", "envelope_exceeded")
+    assert any(d["field"] == "bust_circumference" for d in error["details"])
+
+
+def test_an_envelope_warning_proceeds_once_confirmed(yaml_ok, confirmations):
+    payload = {"yamlText": yaml_ok, "confirmations": confirmations,
+               "corrections": {"bust": 101.0}}
+    assert client.post("/api/patterns/transform", json=payload).status_code == 409
+    confirmed = {**payload, "settings": {"confirm_envelope": True}}
+    response = client.post("/api/patterns/transform", json=confirmed)
+    assert response.status_code == 200, response.text
+    assert response.json()["diagnostics"]["envelope"]["status"] == "warn"
+    assert response.json()["diagnostics"]["envelope"]["confirmed"] is True
+
+
+def test_the_second_profile_is_refused_with_its_reason(yaml_pascual, confirmations):
+    response = client.post("/api/patterns/transform",
                            json={"yamlText": yaml_pascual, "confirmations": confirmations})
     assert response.status_code == 409
     assert any(d["code"] == "INVALID" for d in response.json()["error"]["details"])
 
 
-# ---- step 6: generation ----------------------------------------------------
+# ---- transformation --------------------------------------------------------
 
-def test_generate_returns_pattern_trace_and_validation(generated):
-    assert set(generated) >= {"pattern", "trace", "validation", "preview"}
+def test_transform_returns_pattern_trace_diagnostics_and_validation(generated):
+    assert set(generated) >= {"pattern", "trace", "diagnostics", "validation", "preview"}
     assert generated["validation"]["status"] == "pass"
-    assert generated["trace"]["method"] == "formula-drafting"
-    assert generated["trace"]["rules"]
+    assert generated["trace"]["method"] == "base-block-transformation"
 
 
-def test_manifest_records_the_semantics_decision(generated):
+def test_the_manifest_identifies_the_base_block_and_configuration(generated):
     trace = generated["trace"]
-    assert trace["measurement_schema_version"]
-    assert trace["definition_version"]
-    assert trace["generated_at"]
-    assert trace["software_version"]
+    assert trace["base_block"]["id"] == "bodice-ref-a"
+    assert trace["base_block"]["version"]
+    assert trace["base_block"]["source_sha256"]
+    assert trace["base_block"]["reviewed"] is True
+    assert trace["base_block"]["reference_measurements_mm"]["bust_circumference"] == 858.0
+    assert trace["base_block"]["measurement_definitions"]["bust_girth"]
+    assert trace["transformation_config"]["version"]
+    assert trace["transformation_config"]["influence_map_version"]
+    assert trace["transformation_config"]["objective"]["w_landmark"] == 1.0
     assert trace["units"] == {"source": "cm", "pattern": "mm"}
-    assert trace["coordinate_convention"]["vertical_origin"]
-    interp = trace["field_interpretations"]["vert_bust_line"]
-    assert interp["meaning"] == "neck_to_bust_apex_vertical"
-    assert interp["status"] == "assumed"
-    assert interp["confirmed_by"] == "operator"
-    assert "bust_to_waist_vertical" in trace["derived_measurements"]
-    assert trace["drafting_measurements_mm"]["bust_to_waist_vertical"] == 117.0
+    assert trace["generated_at"] and trace["software_version"]
 
 
-def test_generate_produces_front_and_back_panels(generated):
+def test_the_response_carries_deltas_diagnostics_and_achieved_dimensions(generated):
+    diagnostics = generated["diagnostics"]
+    assert diagnostics["solver"]["front"]["converged"] is True
+    assert diagnostics["solver"]["front"]["method"] == "thin_plate_spline"
+    assert any(d["name"] == "bust_circumference" for d in diagnostics["deltas"])
+    assert diagnostics["achievedDimensions"]["bust_girth"] > 0
+    assert diagnostics["requestedDimensions"]["bust_girth"]["requestedMm"] > 0
+    assert diagnostics["seamMismatchBeforeBalancing"]
+    assert diagnostics["seamMismatchAfterMm"]
+    assert diagnostics["seamBalanceRounds"]
+    assert diagnostics["landmarkTargets"][0]["displacementMm"] > 0
+
+
+def test_transform_preserves_panels_and_identifiers(generated):
     panels = generated["pattern"]["panels"]
     assert len(panels) == 2
     assert [p["label"] for p in panels] == ["Front bodice", "Back bodice"]
+    block_id = generated["trace"]["base_block"]["id"]
+    base = client.get("/api/base-blocks/" + block_id).json()
+    assert [p["id"] for p in panels] == [p["id"] for p in base["panels"]]
 
 
-def test_generate_preview_has_svg_and_extent(generated):
-    assert "<svg" in generated["preview"]["svg"]
-    assert len(generated["preview"]["extent"]) == 4
+def test_each_block_can_be_transformed_through_the_api(yaml_target, confirmations):
+    payloads = set()
+    for block_id in ("bodice-ref-a", "bodice-ref-b", "bodice-ref-c"):
+        response = client.post("/api/patterns/transform", json={
+            "yamlText": yaml_target, "confirmations": confirmations,
+            "settings": {"base_block_id": block_id}})
+        assert response.status_code == 200, (block_id, response.text)
+        data = response.json()
+        assert data["validation"]["status"] == "pass"
+        assert data["trace"]["base_block"]["id"] == block_id
+        payloads.add(json.dumps(data["pattern"]))
+    assert len(payloads) == 3
 
 
-def test_drafting_output_changes_with_a_different_interpretation(yaml_ok, confirmations):
-    half = client.post("/api/patterns/generate",
+def test_the_preview_carries_both_blocks_for_comparison(generated):
+    preview = generated["preview"]
+    assert "<svg" in preview["svg"]
+    assert 'data-layer="base"' in preview["svg"]
+    assert 'data-layer="displacement"' in preview["svg"]
+    assert 'data-layer="heatmap"' in preview["svg"]
+    assert len(preview["extent"]) == 4
+    assert [p["key"] for p in preview["basePanels"]] == ["front", "back"]
+    assert preview["displacements"]
+
+
+def test_a_zero_delta_target_reproduces_the_base_block_over_http(yaml_ok, confirmations):
+    response = client.post("/api/patterns/transform",
+                           json={"yamlText": yaml_ok, "confirmations": confirmations})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["diagnostics"]["landmarkTargets"][0]["displacementMm"] == 0.0
+    assert all(abs(d["deltaValue"]) < 1e-6 for d in data["diagnostics"]["deltas"])
+
+
+def test_a_different_target_moves_the_geometry(yaml_ok, yaml_target, confirmations):
+    base = client.post("/api/patterns/transform",
                        json={"yamlText": yaml_ok, "confirmations": confirmations}).json()
-    full = client.post("/api/patterns/generate", json={
-        "yamlText": yaml_ok,
-        "confirmations": {**confirmations, "shoulder_w": "full_across_shoulder_tips"},
-    }).json()
-    assert half["pattern"] != full["pattern"]
-    assert full["trace"]["field_interpretations"]["shoulder_w"]["candidate"] == \
-        "full_across_shoulder_tips"
+    other = client.post("/api/patterns/transform",
+                        json={"yamlText": yaml_target, "confirmations": confirmations}).json()
+    assert base["pattern"] != other["pattern"]
+    assert other["diagnostics"]["landmarkTargets"][0]["displacementMm"] > 1.0
 
 
-# ---- step 7/8: validation and exports --------------------------------------
+# ---- validation and exports ------------------------------------------------
 
 def test_validate_accepts_our_own_output(generated):
     response = client.post("/api/patterns/validate", json={"pattern": generated["pattern"]})
@@ -211,9 +384,9 @@ def test_validate_rejects_a_schema_violation(generated):
     assert response.json()["error"]["code"] == "invalid_pattern_schema"
 
 
-def test_render_returns_the_same_geometry_as_generate(yaml_ok, confirmations, generated):
+def test_render_returns_the_same_geometry_as_transform(yaml_target, confirmations, generated):
     data = client.post("/api/patterns/render",
-                       json={"yamlText": yaml_ok, "confirmations": confirmations}).json()
+                       json={"yamlText": yaml_target, "confirmations": confirmations}).json()
     assert data["svg"] == generated["preview"]["svg"]
 
 
@@ -222,29 +395,35 @@ def test_render_returns_the_same_geometry_as_generate(yaml_ok, confirmations, ge
     ("/api/patterns/export/dxf", "dxf", b"SECTION"),
     ("/api/patterns/export/svg", "svg", b"<svg"),
 ])
-def test_exports(yaml_ok, confirmations, path, name, magic):
-    response = client.post(path, json={"yamlText": yaml_ok, "confirmations": confirmations})
+def test_exports(yaml_target, confirmations, path, name, magic):
+    response = client.post(path, json={"yamlText": yaml_target, "confirmations": confirmations})
     assert response.status_code == 200
     assert magic in response.content
     assert name in response.headers["content-disposition"]
 
 
 def test_exports_are_blocked_when_semantics_are_unresolved(yaml_ok):
-    for path in ("/api/patterns/export/pdf", "/api/patterns/export/dxf", "/api/patterns/export/bundle"):
+    for path in ("/api/patterns/export/pdf", "/api/patterns/export/dxf",
+                 "/api/patterns/export/bundle"):
         response = client.post(path, json={"yamlText": yaml_ok})
         assert response.status_code == 409, path
 
 
-def test_export_bundle(yaml_ok, confirmations):
+def test_export_bundle_contains_every_required_file(yaml_target, confirmations):
     response = client.post("/api/patterns/export/bundle",
-                           json={"yamlText": yaml_ok, "confirmations": confirmations})
+                           json={"yamlText": yaml_target, "confirmations": confirmations})
     with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
-        assert {"pattern.json", "validation-report.json", "pattern-a0.pdf",
-                "generation-manifest.json"} <= set(zf.namelist())
-        report = json.loads(zf.read("validation-report.json"))
-        assert report["status"] == "pass"
+        names = set(zf.namelist())
+        assert {"pattern.json", "generation-manifest.json", "transformation-diagnostics.json",
+                "validation-report.json", "base-vs-target-preview.png", "pattern-a0.pdf",
+                "pattern.dxf", "base-block-landmark-map.json",
+                "base-block-edge-map.json", "base-block-seam-map.json",
+                "base-block-dart-map.json", "base-block-grainline-map.json"} <= names
+        assert json.loads(zf.read("validation-report.json"))["status"] == "pass"
         manifest_data = json.loads(zf.read("generation-manifest.json"))
-        assert manifest_data["measurement_schema_version"]
+        assert manifest_data["base_block"]["id"] == "bodice-ref-a"
+        diagnostics = json.loads(zf.read("transformation-diagnostics.json"))
+        assert diagnostics["solver"]["front"]["converged"] is True
 
 
 def test_config_endpoint():
@@ -252,6 +431,9 @@ def test_config_endpoint():
     assert "fitted" in data["easePresets"]
     assert data["paper"]["default_size"] == "A0"
     assert "cutting" in data["viewLayers"]
+    assert set(data["comparisonLayers"]) == {"base", "displacement", "heatmap"}
+    assert data["transformation"]["method"] == "thin_plate_spline"
+    assert data["transformation"]["envelope"]["stop_factor"] == 2.0
     assert data["measurementSchema"]["schemaVersion"]
 
 
@@ -282,22 +464,28 @@ def test_built_assets_are_served():
 
 # ---- the exact sequence a browser runs --------------------------------------
 
-def test_browser_sequence_from_upload_to_generation(yaml_ok, confirmations):
-    """Reproduce the click path: syntax -> definitions -> generate, in that order."""
+def test_browser_sequence_from_upload_to_export(yaml_target, confirmations):
+    """Reproduce the click path: syntax, definitions, base deltas, transform, export."""
     assert client.post("/api/measurements/validate",
-                       json={"filename": "body.yaml", "content": yaml_ok}).status_code == 200
+                       json={"filename": "body.yaml", "content": yaml_target}).status_code == 200
     assert client.post("/api/measurements/semantics",
-                       json={"yamlText": yaml_ok}).status_code == 200
-    assert client.post("/api/measurements/semantics",
-                       json={"yamlText": yaml_ok, "confirmations": confirmations}).status_code == 200
-    assert client.post("/api/patterns/generate",
-                       json={"yamlText": yaml_ok, "confirmations": confirmations}).status_code == 200
+                       json={"yamlText": yaml_target}).status_code == 200
+    assert client.get("/api/base-blocks").status_code == 200
+    assert client.post("/api/base-block/deltas",
+                       json={"yamlText": yaml_target,
+                             "confirmations": confirmations}).status_code == 200
+    assert client.post("/api/patterns/transform",
+                       json={"yamlText": yaml_target,
+                             "confirmations": confirmations}).status_code == 200
+    assert client.post("/api/patterns/export/bundle",
+                       json={"yamlText": yaml_target,
+                             "confirmations": confirmations}).status_code == 200
 
 
-def test_invalid_yaml_is_a_structured_error_for_semantics_endpoints():
+def test_invalid_yaml_is_a_structured_error_everywhere():
     payload = {"yamlText": "body: [invalid"}
     for path in ("/api/measurements/semantics", "/api/measurements/report",
-                 "/api/patterns/generate"):
+                 "/api/base-block/deltas", "/api/patterns/transform"):
         response = client.post(path, json=payload)
         assert response.status_code == 422, path
         assert response.json()["error"]["code"] == "invalid_yaml"
@@ -306,19 +494,17 @@ def test_invalid_yaml_is_a_structured_error_for_semantics_endpoints():
 
 def test_no_endpoint_returns_a_raw_traceback(yaml_ok, confirmations):
     """Broken payloads come back as structured errors, never a 500 stack trace."""
-    # an unknown candidate is reported on /semantics so the screen can render it, and
-    # refused by /generate
     reported = {"yamlText": yaml_ok, "confirmations": {"shoulder_w": "not_a_candidate"}}
     response = client.post("/api/measurements/semantics", json=reported)
     assert response.status_code == 200
     assert "Traceback" not in response.text
-    gated = client.post("/api/patterns/generate", json=reported)
+    gated = client.post("/api/patterns/transform", json=reported)
     assert gated.status_code == 409
     assert {"code", "message", "details"} <= set(gated.json()["error"])
 
-    # an unparseable correction is rejected at the request boundary
-    unparseable = {"yamlText": yaml_ok, "confirmations": confirmations, "corrections": {"bust": "wide"}}
-    for path in ("/api/measurements/semantics", "/api/patterns/generate"):
+    unparseable = {"yamlText": yaml_ok, "confirmations": confirmations,
+                   "corrections": {"bust": "wide"}}
+    for path in ("/api/measurements/semantics", "/api/patterns/transform"):
         response = client.post(path, json=unparseable)
         assert response.status_code == 422, path
         assert "Traceback" not in response.text
@@ -332,7 +518,7 @@ def test_unknown_request_keys_are_rejected_by_the_schema(yaml_ok):
 
 
 def test_an_unknown_candidate_is_refused_and_stays_blocked(yaml_ok):
-    """Reported on /semantics so the operator can correct it, refused by /generate."""
+    """Reported on /semantics so the operator can correct it, refused by /transform."""
     payload = {"yamlText": yaml_ok, "confirmations": {"shoulder_w": "nope"}}
     data = client.post("/api/measurements/semantics", json=payload).json()
     assert data["source"]["canGenerate"] is False
@@ -340,6 +526,6 @@ def test_an_unknown_candidate_is_refused_and_stays_blocked(yaml_ok):
     assert "not a candidate" in detail["message"]
     assert "half_neck_to_shoulder_tip" in detail["message"]
 
-    gated = client.post("/api/patterns/generate", json=payload)
+    gated = client.post("/api/patterns/transform", json=payload)
     assert gated.status_code == 409
     assert gated.json()["error"]["code"] == "semantics_unresolved"

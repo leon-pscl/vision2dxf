@@ -5,16 +5,18 @@ import { Button, Callout, Spinner } from './components/ui'
 import { UploadStep } from './upload/UploadStep'
 import { DefinitionsStep } from './semantics/DefinitionsStep'
 import { MeasurementReview } from './measurement-review/MeasurementReview'
+import { BaseBlockStep } from './base-block/BaseBlockStep'
 import { ConfigureStep } from './configure/ConfigureStep'
 import { GenerationStep } from './generate/GenerationStep'
-import { PatternViewer } from './pattern-viewer/PatternViewer'
+import { ComparisonViewer } from './comparison-viewer/ComparisonViewer'
 import { ValidationView } from './validation-view/ValidationView'
 import { ExportView } from './export-view/ExportView'
 import { STEPS, firstIncompleteStep, stepIndex, type StepId } from './steps'
-import type { AppConfig, GenerateResponse, Review, Settings } from './types'
+import type { AppConfig, Review, Settings, TransformResponse } from './types'
 
 const DEFAULT_SETTINGS: Settings = {
   garment_type: 'basic_bodice',
+  base_block_id: null,
   ease_preset: 'fitted',
   bust_ease_mm: null,
   waist_ease_mm: null,
@@ -23,10 +25,7 @@ const DEFAULT_SETTINGS: Settings = {
   cutting_join: null,
   paper_size: null,
   paper_orientation: null,
-  shoulder_slope_deg: null,
-  armscye_depth_mm: null,
-  bust_apex_y_mm: null,
-  dart_intake_mm: null,
+  confirm_envelope: false,
   unit: 'cm',
 }
 
@@ -42,8 +41,9 @@ export default function App() {
   const [input, setInput] = useState<GenerationPayload>(EMPTY_PAYLOAD)
   const [review, setReview] = useState<Review | null>(null)
   const [semanticsReady, setSemanticsReady] = useState(false)
+  const [blockReady, setBlockReady] = useState(false)
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
-  const [result, setResult] = useState<GenerateResponse | null>(null)
+  const [result, setResult] = useState<TransformResponse | null>(null)
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -64,11 +64,11 @@ export default function App() {
     setBusy(true)
     setError(null)
     try {
-      setResult(await api.generate(input, settings))
-      setStep(stepIndex('inspect'))
+      setResult(await api.transform(input, settings))
+      setStep(stepIndex('compare'))
     } catch (e) {
-      setError(e instanceof RequestError ? e.message : 'Generation failed')
-      setStep(stepIndex('definitions'))
+      setError(e instanceof RequestError ? e.message : 'Transformation failed')
+      setStep(stepIndex('base'))
     } finally {
       setBusy(false)
     }
@@ -80,16 +80,20 @@ export default function App() {
         upload: input.yamlText.trim().length > 0,
         definitions: semanticsReady,
         review: semanticsReady,
-        configure: semanticsReady,
-        generate: semanticsReady,
-        inspect: Boolean(result),
+        base: semanticsReady,
+        configure: semanticsReady && blockReady,
+        generate: semanticsReady && blockReady,
+        compare: Boolean(result),
         validation: Boolean(result),
         export: Boolean(result),
       }) as Record<StepId, boolean>,
-    [input, semanticsReady, result],
+    [input, semanticsReady, blockReady, result],
   )
 
   const furthest = firstIncompleteStep(ready)
+  const invalidate = () => {
+    setResult(null)
+  }
 
   return (
     <div className="app">
@@ -97,8 +101,8 @@ export default function App() {
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />
           <div>
-            <strong>Formula drafting</strong>
-            <small>anthropometric bodice from documented equations</small>
+            <strong>Base-block transformation</strong>
+            <small>a validated pattern block, deformed to measured body data</small>
           </div>
         </div>
         <div className="row">
@@ -122,7 +126,7 @@ export default function App() {
           </Callout>
         ) : null}
 
-        {step === 0 ? (
+        {step === stepIndex('upload') ? (
           <UploadStep
             yaml={input.yamlText}
             filename={input.filename}
@@ -131,66 +135,97 @@ export default function App() {
             onUploaded={(r) => {
               setReview(r)
               setSemanticsReady(false)
+              setBlockReady(false)
+              invalidate()
               setStep(stepIndex('definitions'))
             }}
           />
         ) : null}
 
-        {step === 1 ? (
+        {step === stepIndex('definitions') ? (
           <DefinitionsStep
             input={input}
             onChange={(next) => {
               setInput(next)
-              setResult(null)
+              invalidate()
               setSemanticsReady(false)
             }}
-            onBack={() => setStep(0)}
+            onBack={() => setStep(stepIndex('upload'))}
             onReady={() => setSemanticsReady(true)}
           />
         ) : null}
 
-        {step === 2 && review ? (
-          <MeasurementReview
-            review={review}
-            confirmations={input.confirmations}
-            onCorrections={(corrections) => setInput({ ...input, corrections })}
-          />
-        ) : (
-          step === 2 ? <p>Import a YAML file first.</p> : null
-        )}
+        {step === stepIndex('review') ? (
+          review ? (
+            <MeasurementReview
+              review={review}
+              confirmations={input.confirmations}
+              onCorrections={(corrections) => {
+                setInput({ ...input, corrections })
+                invalidate()
+              }}
+            />
+          ) : (
+            <p>Import a YAML file first.</p>
+          )
+        ) : null}
 
-        {step === 3 ? (
+        {step === stepIndex('base') ? (
+          <BaseBlockStep
+            input={input}
+            settings={settings}
+            onChange={(next) => {
+              setSettings(next)
+              invalidate()
+            }}
+            onReady={setBlockReady}
+          />
+        ) : null}
+
+        {step === stepIndex('configure') ? (
           <ConfigureStep
             settings={settings}
-            onChange={setSettings}
+            onChange={(next) => {
+              setSettings(next)
+              invalidate()
+            }}
             config={config}
             assumptions={result?.trace.assumptions ?? []}
           />
         ) : null}
 
-        {step === 4 ? (
+        {step === stepIndex('generate') ? (
           <div className="stack">
-            <h2>Generate the pattern</h2>
+            <h2>Transform the base block</h2>
             <p className="muted">
-              Drafting runs the rule registry end to end and validates the geometry before anything is shown.
-              Confirmations from the definitions screen travel with the request.
+              The block is loaded, validated, and deformed onto the target landmarks with a thin-plate
+              spline. Nothing is redrafted from a formula: panel count, boundary order, edge roles,
+              identifiers, stitches and grain direction all survive the transformation.
             </p>
-            <Button variant="primary" onClick={() => void generate()} disabled={busy || !semanticsReady}>
-              {busy ? 'Drafting…' : result ? 'Regenerate pattern' : 'Generate pattern'}
+            <Button variant="primary" onClick={() => void generate()} disabled={busy || !ready.generate}>
+              {busy ? 'Transforming…' : result ? 'Transform again' : 'Transform pattern'}
             </Button>
             {!semanticsReady ? (
               <Callout tone="warn">
-                Every required field needs a confirmed definition before generation is allowed.
+                Every required field needs a confirmed definition before a transformation is allowed.
               </Callout>
             ) : null}
-            {busy ? <Spinner label="Drafting panels, running geometry checks…" /> : null}
+            {semanticsReady && !blockReady ? (
+              <Callout tone="warn">
+                Pick a base block whose validation passes, and confirm the transformation limits if the
+                target sits outside the tested range.
+              </Callout>
+            ) : null}
+            {busy ? <Spinner label="Solving the deformation, balancing seams, running geometry checks…" /> : null}
             {result ? <GenerationStep result={result} /> : null}
           </div>
         ) : null}
 
-        {step === 5 && result ? <PatternViewer preview={result.preview} /> : null}
-        {step === 6 && result ? <ValidationView report={result.validation} /> : null}
-        {step === 7 && result ? (
+        {step === stepIndex('compare') && result ? (
+          <ComparisonViewer preview={result.preview} diagnostics={result.diagnostics} />
+        ) : null}
+        {step === stepIndex('validation') && result ? <ValidationView report={result.validation} /> : null}
+        {step === stepIndex('export') && result ? (
           <ExportView result={result} input={input} settings={settings} />
         ) : null}
       </main>
@@ -209,7 +244,7 @@ export default function App() {
           </Button>
         </div>
         <small className="muted">
-          Geometry in millimetres · endpoint tolerance 0.1 mm · no master pattern is loaded
+          Geometry in millimetres · endpoint tolerance 0.1 mm · the base block is deformed, never redrafted
         </small>
       </footer>
     </div>

@@ -10,6 +10,8 @@ from ..config import drafting_config, seam_allowance
 @dataclass
 class Settings:
     garment_type: str = "basic_bodice"
+    # Which base block to transform; empty means the catalog default.
+    base_block_id: str | None = None
     ease_preset: str = "fitted"
     bust_ease_mm: float | None = None
     waist_ease_mm: float | None = None
@@ -18,11 +20,9 @@ class Settings:
     cutting_join: str | None = None
     paper_size: str | None = None
     paper_orientation: str | None = None
-    # explicit overrides, exposed because the source measurements may be unusable
-    shoulder_slope_deg: float | None = None
-    armscye_depth_mm: float | None = None
-    bust_apex_y_mm: float | None = None
-    dart_intake_mm: float | None = None
+    # Operator confirmation that a target outside the tested transformation envelope may
+    # still be transformed. A `stop` envelope status is refused regardless.
+    confirm_envelope: bool = False
     unit: str = "cm"
 
     def as_dict(self) -> dict:

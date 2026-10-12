@@ -8,5 +8,8 @@ docs
 backend/requirements-dev.txt
 backend/app/static
 sample
+# 2.9 GB of pattern files. The catalog's own templates ship in assets/, and the full
+# library is mounted at /srv/templates only if ad-hoc template selection is wanted.
+/templates
 *.md
 !README.md

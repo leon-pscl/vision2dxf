@@ -22,15 +22,19 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/app/ ./app/
 COPY fixtures/ /srv/fixtures/
+COPY assets/ /srv/assets/
+# The full GarmageSet library is deliberately not copied: it is 2.9 GB and only needed
+# for ad-hoc template selection. Mount it at /srv/templates to enable that.
 COPY --from=ui /build/backend/app/static /srv/app/static
 
 
 # ---- stage 3: test image ----------------------------------------------------
-# docker build --target test -t formula-drafting:test . && docker run --rm formula-drafting:test
+# docker build --target test -t base-block-transform:test . && docker run --rm base-block-transform:test
 FROM app AS test
 RUN pip install --no-cache-dir pytest==8.3.4 httpx==0.28.1
 COPY backend/tests/ /srv/backend/tests/
 COPY backend/pytest.ini /srv/backend/pytest.ini
+COPY scripts/ /srv/scripts/
 WORKDIR /srv/backend
 CMD ["python", "-m", "pytest"]
 

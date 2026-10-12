@@ -2,9 +2,10 @@ export const STEPS = [
   { id: 'upload', title: 'Upload YAML' },
   { id: 'definitions', title: 'Field definitions' },
   { id: 'review', title: 'Review measurements' },
-  { id: 'configure', title: 'Garment & ease' },
-  { id: 'generate', title: 'Generate' },
-  { id: 'inspect', title: 'Inspect pattern' },
+  { id: 'base', title: 'Base block & differences' },
+  { id: 'configure', title: 'Ease & limits' },
+  { id: 'generate', title: 'Transform' },
+  { id: 'compare', title: 'Compare base & target' },
   { id: 'validation', title: 'Review validation' },
   { id: 'export', title: 'Export files' },
 ] as const

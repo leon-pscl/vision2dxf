@@ -1,6 +1,8 @@
-# Drafting constants, tolerances and presets.
-# Every magic number used by the drafting engine lives here; no unexplained
-# constants are allowed inside geometry functions (design doc, "Drafting Rule Registry").
+# Geometry tolerances, ease presets, seam allowances, paper sizes and the
+# fixture-compatible defaults of the GarmageSet schema.
+#
+# Transformation weights, solver limits, the envelope and the influence map live in
+# transformation.yaml. No unexplained constant is allowed inside a geometry function.
 version: "1.0.0"
 units: mm
 
@@ -17,44 +19,11 @@ tolerances:
   seam_mismatch_abs_mm: 2.0
   seam_mismatch_rel: 0.005
 
-# Plausibility windows. A value outside the window is *reported*, never silently
-# rewritten, unless the window is explicitly a clamp (see `clamped` below).
-ranges:
-  height_cm: [120.0, 210.0]
-  shoulder_slope_deg: [15.0, 30.0]
-  dart_intake_ratio: [0.2, 0.6]
-  front_neck_depth_ratio: [0.35, 0.9]
-  armscye_above_bust_mm: 60.0
-
-# The shoulder slope is the only input clamped into a drafting window; the clamp
-# is always accompanied by a warning carrying the original value.
-clamped:
-  shoulder_slope_deg: true
-
+# The one drafting constant the measurement semantics layer still needs: how far back
+# along the shoulder the neck reference point sits from the shoulder-neck point, used
+# when deriving a shoulder seam length from an across-shoulder measurement.
 constants:
-  # distance from the shoulder-neck point back along the shoulder to the neck point
   shoulder_neck_offset_mm: 50.0
-  # neckline half width = share * neck_w   (neck_w is read as half neck girth)
-  neck_shoulder_share: 0.45
-  # The neck-shoulder point sits this far above the centre neck point on BOTH panels,
-  # so front and back share one shoulder reference line and their side seams sew to
-  # the same length. Front/back neckline shape is set by the depth ratios below.
-  neck_rise_mm: 8.0
-  front_neck_depth_ratio: 0.62
-  front_neck_dip_x_ratio: 0.38
-  back_neck_depth_ratio: 0.35
-  back_neck_dip_x_ratio: 0.45
-  # bust apex sits this fraction of the bust projection inboard of the side seam
-  bust_apex_inset_ratio: 0.55
-  # waist dart intake as a fraction of the measured bust projection
-  dart_intake_ratio: 0.40
-  dart_top_offset_mm: 15.0
-  dart_min_height_mm: 40.0
-  # cubic handle length as a fraction of the chord (neckline / armscye)
-  neckline_handle_ratio: 0.42
-  armscye_handle_ratio: 0.58
-  # warning when the underarm point ends up above the bust line
-  armscye_min_below_bust_mm: 0.0
 
 ease_presets:
   skin_thin: { bust_mm: 20.0, waist_mm: 20.0, hip_mm: 20.0 }

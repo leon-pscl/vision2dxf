@@ -51,7 +51,8 @@ def test_straight_edges_serialise_two_endpoints(basic_result):
     assert straight, "expected straight edges to serialise as two endpoints"
 
 
-def test_curves_serialise_as_sampled_polylines(basic_result):
+def test_curved_edges_keep_their_control_polyline(basic_result):
+    """A template edge is a control polyline, and it survives serialisation as one."""
     payload = to_fixture_dict(basic_result.document)
     front = payload["panels"][0]["seqEdges"][0]
     curved = [e for e in front["edges"] if len(e["controlPoints"]) > 2]
@@ -109,13 +110,11 @@ def test_round_trip_preserves_coordinates_exactly(basic_result):
     assert again == payload
 
 
-def test_serialisation_is_deterministic(basic_source, default_confirmations):
-    from app.drafting.ease import Settings
-    from app.drafting.pipeline import draft
-    from app.drafting.semantics import resolve
-    conf = default_confirmations
-    first = to_fixture_dict(draft(resolve(basic_source.values_cm, conf), Settings()).document)
-    second = to_fixture_dict(draft(resolve(basic_source.values_cm, conf), Settings()).document)
+def test_serialisation_is_deterministic():
+    from conftest import transform_profile
+
+    first = to_fixture_dict(transform_profile("body_measurements_target_a.yaml").document)
+    second = to_fixture_dict(transform_profile("body_measurements_target_a.yaml").document)
     assert json.dumps(first) == json.dumps(second)
 
 

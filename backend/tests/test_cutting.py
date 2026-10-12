@@ -8,7 +8,7 @@ from app.drafting.cutting import build_cutting_lines, flatten_boundary
 from app.drafting.curves import arc_points, offset_polylines, signed_area
 from app.drafting.ease import Settings
 from app.drafting.geometry import Point2D
-from app.drafting.pipeline import draft
+from conftest import transform_profile
 
 TOL = 1e-6
 
@@ -44,8 +44,8 @@ def test_zero_distance_keeps_a_fold_edge_in_place():
 
 
 @pytest.mark.parametrize("join", ["miter", "bevel", "round"])
-def test_every_join_style_produces_a_closed_contour(join, basic_resolution):
-    result = draft(basic_resolution, Settings(cutting_join=join))
+def test_every_join_style_produces_a_closed_contour(join):
+    result = transform_profile("body_measurements_target_a.yaml", cutting_join=join)
     for key, line in result.cutting.items():
         assert line.join == join
         assert len(line.contour) >= 3
@@ -79,21 +79,29 @@ def test_cutting_line_sits_outside_the_sewing_line(basic_result):
     assert max(p.x for p in cutting.contour) > max(p.x for p in sewing)
 
 
-def test_centre_edge_keeps_zero_allowance(basic_result):
+def test_seam_allowance_follows_the_semantic_role(basic_result):
+    """A full mirrored panel has no fold edge: every boundary edge is cut, by its role."""
     front = next(p for p in basic_result.document.panels if p.key == "front")
-    assert front.edge_by_role("center_front").seam_allowance_mm == 0.0
-    assert front.edge_by_role("waist").seam_allowance_mm == \
-        drafting_config()["seam_allowance_mm"]["waist"]
+    table = drafting_config()["seam_allowance_mm"]
+    for role in ("waist", "side_seam", "armscye", "shoulder", "neckline"):
+        edge = front.edge_by_role(role)
+        assert edge is not None, role
+        assert edge.seam_allowance_mm == table.get(role, table["default"]), role
 
 
-def test_dart_cutting_contours_exist(basic_result):
-    front = next(p for p in basic_result.document.panels if p.key == "front")
-    assert len(front.darts) == 1
-    assert len(basic_result.cutting["front"].dart_contours) == 2
+def test_dart_edges_are_cut_like_any_other_boundary(transformed):
+    """A dart here is a stretch of boundary sewn shut, so it is offset with the rest."""
+    result = transformed[("target_a", "bodice-ref-c")]
+    front = next(p for p in result.document.panels if p.key == "front")
+    darts = [e for e in front.edges if e.role == "dart"]
+    assert darts
+    assert all(e.seam_allowance_mm > 0.0 for e in darts)
+    assert len(result.cutting["front"].contour) >= len(front.edges)
 
 
-def test_seam_allowance_override_is_applied(basic_resolution):
-    result = draft(basic_resolution, Settings(seam_allowances={"armscye": 25.0}))
+def test_seam_allowance_override_is_applied():
+    result = transform_profile("body_measurements_target_a.yaml",
+                               seam_allowances={"armscye": 25.0})
     front = next(p for p in result.document.panels if p.key == "front")
     assert front.edge_by_role("armscye").seam_allowance_mm == 25.0
 

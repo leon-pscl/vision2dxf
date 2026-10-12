@@ -14,6 +14,8 @@ class UploadRequest(BaseModel):
 class SettingsPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
     garment_type: str = "basic_bodice"
+    # A catalog block id, or `template:<file>.json` to load any template in the library.
+    base_block_id: str | None = None
     ease_preset: str = "fitted"
     bust_ease_mm: float | None = None
     waist_ease_mm: float | None = None
@@ -22,10 +24,9 @@ class SettingsPayload(BaseModel):
     cutting_join: str | None = None
     paper_size: str | None = None
     paper_orientation: str | None = None
-    shoulder_slope_deg: float | None = None
-    armscye_depth_mm: float | None = None
-    bust_apex_y_mm: float | None = None
-    dart_intake_mm: float | None = None
+    # Transformation-strength limits: the envelope is advisory only once confirmed, and
+    # still refuses a target more than stop_factor past the tested range.
+    confirm_envelope: bool = False
     unit: str = "cm"
 
 
@@ -43,11 +44,14 @@ class SemanticsRequest(BaseModel):
     corrections: dict[str, float] = Field(default_factory=dict)
 
 
-class GenerateRequest(SemanticsRequest):
+class TransformRequest(SemanticsRequest):
+    """A transformation request: the target profile, its confirmations and the settings."""
+
     settings: SettingsPayload = Field(default_factory=SettingsPayload)
+    dark: bool = False
 
 
-ExportRequest = GenerateRequest
+ExportRequest = TransformRequest
 
 
 class RenderRequest(BaseModel):

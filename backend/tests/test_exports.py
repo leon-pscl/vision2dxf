@@ -48,7 +48,7 @@ def test_dxf_is_readable_and_in_millimetres(basic_result):
 def test_dxf_is_full_scale(basic_result):
     """Sewing-line polyline coordinates must equal the document's millimetres."""
     from app.config import drafting_config
-    from app.drafting.panels import world_point
+    from app.drafting.geometry import world_point
 
     data = export_dxf(basic_result.document, basic_result.cutting)
     doc = ezdxf.read(io.StringIO(data.decode("utf-8")))
@@ -64,16 +64,18 @@ def test_dxf_is_full_scale(basic_result):
 
 
 def test_dxf_has_one_layer_per_geometry_class(basic_result):
+    """A block derived from a template carries no notch marks and no cut-out darts, so
+    those layers are empty; the geometry classes it does have each get their own."""
     data = export_dxf(basic_result.document, basic_result.cutting)
     doc = ezdxf.read(io.StringIO(data.decode("utf-8")))
     layers = {e.dxf.layer for e in doc.modelspace()}
-    assert {"SEWING", "CUTTING", "CONSTRUCTION", "DARTS", "NOTCHES"} <= layers
+    assert {"SEWING", "CUTTING", "CONSTRUCTION"} <= layers
 
 
 def test_preview_svg_matches_the_exported_geometry(basic_result):
     svg = render_svg(basic_result.document, basic_result.cutting)
     front = basic_result.document.panels[0]
-    p = front.landmarks["shoulder_tip"]
+    p = front.landmarks["left.shoulder_tip"]
     world = p.x + front.center.x, p.y + front.center.y
     assert f"{world[0]:.2f}" in svg or f"{world[0]:.1f}" in svg
 
@@ -89,20 +91,20 @@ def test_preview_png_is_a_png(basic_result):
     assert data[:8] == b"\x89PNG\r\n\x1a\n"
 
 
-def test_bundle_contains_every_required_file(basic_source, default_confirmations):
+def test_bundle_contains_every_required_file(base_confirmations):
     import json
 
     from app.api.routes import export_bundle
     from app.schemas.api import ExportRequest, SettingsPayload
     from conftest import yaml_text
 
-    payload = dict(yamlText=yaml_text("body_measurements.yaml"),
-                   confirmations=default_confirmations,
+    payload = dict(yamlText=yaml_text("body_measurements_target_a.yaml"),
+                   confirmations=base_confirmations,
                    settings=SettingsPayload())
     response = export_bundle(ExportRequest(**payload))
     with zipfile.ZipFile(io.BytesIO(response.body)) as zf:
         names = set(zf.namelist())
-        assert {"pattern.json", "generation-manifest.json", "validation-report.json",
-                "pattern-preview.png", "pattern-a0.pdf", "pattern.dxf",
-                "pattern-preview.svg"} <= names
+        assert {"pattern.json", "generation-manifest.json", "transformation-diagnostics.json",
+                "validation-report.json", "base-vs-target-preview.png", "pattern-a0.pdf",
+                "pattern.dxf", "base-vs-target-preview.svg", "base-block.json"} <= names
         assert json.loads(zf.read("validation-report.json"))["status"] == "pass"

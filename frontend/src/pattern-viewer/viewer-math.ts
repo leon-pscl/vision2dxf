@@ -1,6 +1,9 @@
 /** Pure helpers for the pattern viewer. Kept free of React so they are unit-testable. */
 
 export type LayerName =
+  | 'base'
+  | 'displacement'
+  | 'heatmap'
   | 'construction'
   | 'landmarks'
   | 'controls'
@@ -12,9 +15,12 @@ export type LayerName =
   | 'rulers'
 
 export const LAYER_LABELS: Record<LayerName, string> = {
+  base: 'Base block',
+  displacement: 'Displacement vectors',
+  heatmap: 'Deformation heat map',
   construction: 'Construction lines',
   landmarks: 'Named landmarks',
-  controls: 'Bezier control points',
+  controls: 'Control points',
   sewing: 'Sewing lines',
   cutting: 'Cutting lines',
   darts: 'Darts',

@@ -1,4 +1,4 @@
-"""Formula-based drafting app: FastAPI serving the API and the built frontend."""
+"""Parametric base-block transformation app: FastAPI serving the API and the built frontend."""
 from __future__ import annotations
 
 import logging
@@ -15,7 +15,7 @@ from .drafting.semantics import SemanticError
 logger = logging.getLogger("app")
 STATIC_DIR = Path(__file__).parent / "static"
 
-app = FastAPI(title="Formula drafting", version="1.0.0")
+app = FastAPI(title="Parametric base-block transformation", version="2.0.0")
 app.include_router(router)
 
 

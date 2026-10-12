@@ -6,8 +6,8 @@ import ezdxf
 
 from ..config import drafting_config
 from ..drafting.cutting import CuttingLine
-from ..drafting.geometry import PatternDocument, Point2D
-from ..drafting.panels import world_point
+from ..drafting.geometry import PatternDocument, Point2D, world_point
+
 
 LAYERS = (
     ("SEWING", 7),      # white

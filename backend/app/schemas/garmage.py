@@ -42,12 +42,43 @@ class PanelEdge(BaseModel):
     bezierPoints: list[list[float]]
 
 
+# Contour kinds observed across the template library: 3 is the closed outer boundary of a
+# panel, 4 an internal contour - a reference line, a guide, or a closed inner loop.
+CLOSED_BOUNDARY_TYPE = 3
+INTERNAL_TYPE = 4
+
+
 class SeqEdge(BaseModel):
+    """One contour of a panel.
+
+    The closed outer boundary needs at least three vertices to enclose an area. An
+    internal contour is often a single two-point line - a bust, waist or chest reference
+    line - so the minimum there is two. Requiring three everywhere rejects 28 of every 60
+    files in the template library.
+    """
+
     model_config = ConfigDict(extra="forbid")
     type: int
     circleType: int
-    vertices: list[list[float]] = Field(min_length=3)
-    edges: list[PanelEdge] = Field(min_length=3)
+    vertices: list[list[float]] = Field(min_length=2)
+    edges: list[PanelEdge] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def closed_boundary_encloses_area(self):
+        if self.type == CLOSED_BOUNDARY_TYPE:
+            if len(self.vertices) < 3 or len(self.edges) < 3:
+                raise ValueError(
+                    "a closed boundary contour needs at least three vertices and edges"
+                )
+            if len(self.vertices) != len(self.edges):
+                raise ValueError(
+                    "a closed boundary contour needs one edge per vertex"
+                )
+        return self
+
+    @property
+    def is_closed_boundary(self) -> bool:
+        return self.type == CLOSED_BOUNDARY_TYPE
 
 
 class Panel(BaseModel):
