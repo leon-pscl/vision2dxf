@@ -1,476 +1,1066 @@
-# Coding Agent Brief: Body Measurement Demo (Objective 1.1)
+# Coding Agent Brief: Image-Based Body Measurement and Pattern-Ready Export
 
-How to use this file: put it at the repo root (or paste it as your first message).
-Ask the agent to build **one milestone at a time**. After each milestone it must stop,
-run the tests, and report what passed. Do not let it start the next milestone until
-you have checked the debug images yourself.
+## How to use this brief
+
+Place this file at the repository root and give it to the coding agent as the governing specification.
+Build **one milestone at a time**. After every milestone:
+
+1. Run all automated checks.
+2. Save the required visual/debug artifacts.
+3. Report completed acceptance criteria, failed checks, assumptions, and measured runtime.
+4. Stop and wait for approval before starting the next milestone.
+
+Do not silently change a landmark definition, formula, model, threshold, output key, or dependency. If a requirement cannot be implemented as written, state the conflict and propose a testable alternative before coding it.
 
 ---
 
-## 1. What we are building
+## 1. Product objective
 
-A local web app that runs on the measuring-station PC (Core i5, 16 GB RAM, no GPU).
+Build a local web application that acquires body measurements from calibrated images for a made-to-measure pattern-generation workflow.
 
-1. The operator captures a **front** photo and **at least one side** photo (left, right,
-   or both) from a USB webcam.
-2. The app finds the body silhouette (YOLO26-seg) and keypoints (YOLO26-pose).
-3. A **geometric engine** converts silhouette widths and depths into body
-   measurements in cm. It uses no machine-learned measurement model.
-4. The tailor reviews landmarks drawn over the photos. Dragging a landmark recomputes
-   the affected measurements.
-5. The app exports `body_measurements.yaml` in the **GarmentCode body-parameter format**
-   (Korosteleva & Sorkine-Hornung, 2023), which the pattern generator (Objective 1.2)
-   loads directly, plus a sidecar `measurement_report.yaml` with provenance.
+The app must:
 
-This is a demo of the method, not a product. Prefer clear, testable code over features.
+1. Capture or upload raw front, left-side, right-side, back, and optional multi-angle images.
+2. Detect the person with YOLO26 segmentation and obtain pose landmarks with YOLO26 Pose.
+3. preserve and display the image at every meaningful preprocessing and measurement stage.
+4. Compute Montazerian-style direct measurements from paired front/side silhouettes.
+5. Compute additional pattern-driving measurements using documented landmark, contour, planar-section, polyline, and optional multi-view mesh methods.
+6. Allow an operator to inspect and correct landmarks before accepting results.
+7. Display final measurements, method, source views, confidence, warnings, and edit history.
+8. Export a pattern-ready body-measurement file and a detailed provenance report.
 
-## 2. Hard constraints
+This is a research prototype. It may demonstrate acquisition, traceability, repeatability, and pattern-engine compatibility. Until comparison measurements are collected under a standardized protocol, it must **not** claim human-measurement accuracy or equivalence to manual anthropometry.
 
-- Python 3.11, CPU only, runs fully offline. No cloud APIs, no telemetry.
-- Backend: FastAPI + Uvicorn. Frontend: plain HTML, CSS and vanilla JavaScript served by
-  FastAPI (no build step). Use `<canvas>` for overlays.
-- Libraries: `ultralytics`, `opencv-python`, `numpy`, `pyyaml`, `pydantic`, `pytest`,
-  `ruff`, `trimesh` (bench test only), `pygarment` (load test only). Ask before adding anything else.
-- Models: `yolo26s-seg.pt` and `yolo26s-pose.pt` (pretrained). Model paths come
-  from `config/app.yaml`, so fine-tuned weights can be swapped in later without code
-  changes.
-- Do **not** train, fine-tune, or download datasets. Do **not** invent
-  measurements, correction factors, or scales. Every scale comes from the
-  subject's **measured height** over that view's head-to-floor pixel span; the
-  optional lens calibration in `config/calibration.yaml` carries a camera model
-  and nothing else.
-- Internal unit: millimetres (float). Output unit: centimetres, 1 decimal.
-- PEP 8, type hints everywhere, `ruff check` clean, docstrings on public functions.
-- Privacy: images stay in `data/sessions/<id>/`. Each session has a consent checkbox
-  that must be ticked before capture, and a "Delete session" button that removes the
-  folder.
+---
 
-## 3. Repository layout
+## 2. Evidence-to-implementation map
 
-```
+Implement only methods traceable to the following recent studies and primary project documentation:
+
+- **Montazerian (2024)**: portable RGB capture; image correction/enhancement; body isolation; calibration; feature extraction; semi-automatic marker placement; paired frontal breadth and side depth; ellipse-based torso circumference; shoulder and sleeve-related upper-body measurements.
+- **Li et al. (2023), “Non-contact clothing anthropometry based on two-dimensional image contour detection and feature point recognition”**: improved contour extraction, morphology, learned/anatomical landmark support, front/side length measurements, and girth estimation.
+- **Zong et al. (2023), “Predicting Human Body Measurements Using MediaPipe Pose Auto-Capture”**: guided multi-pose capture; pose-based capture gates; user-height scaling; shoulder, chest, waist, and hip widths, depths, and levels from outlines.
+- **Jin et al. (2023), “Pants design and pattern generation based on body images”**: front/side silhouette processing; side-profile landmarks at waist, abdomen, hip, crotch, thigh, knee, and ankle; connection between extracted body dimensions and pants-pattern generation.
+- **Korosteleva et al. (2024), GarmentCodeData**: pattern-driving measurements from body geometry using landmarks, optimized polylines/geodesics, and planar mesh intersections; body measurements are separate from garment design parameters.
+- **GarmentCode official repository and body-measurement specification**: exact output names and compatibility contract for the pinned revision.
+
+Implementation consequences:
+
+- Use Montazerian's two-view method for the core upper-body outputs.
+- Use pose keypoints only as initialization and capture-quality evidence, not as apparel landmarks when definitions differ.
+- Use silhouettes and operator-adjustable anatomical rows for 2D measurements.
+- Use an optional multi-view reconstructed body mesh for surface-path or section measurements that a two-view silhouette cannot defensibly provide.
+- Never manufacture a missing value from a population ratio without labeling it `estimated` and requiring explicit operator acceptance.
+- Never describe a mesh-derived value as directly measured from a photograph.
+
+---
+
+## 3. Scope and output hierarchy
+
+### 3.1 Core direct outputs
+
+The first result panel must show the measurements acquired in Montazerian's workflow:
+
+- Shoulder length, left and right, plus accepted mean.
+- Sleeve/arm length, left and right, plus accepted mean.
+- Chest circumference.
+- Bust circumference.
+- Waist circumference.
+- Hip circumference.
+
+The four circumferences must retain their intermediate values:
+
+- Front breadth in millimetres.
+- Side depth in millimetres.
+- Front and side source rows.
+- Ellipse formula used.
+- Scale for every contributing view.
+
+### 3.2 Extended pattern-ready outputs
+
+The second result panel must show the body inputs required by the pinned GarmentCode revision. At minimum, support the following 26 primary fields, subject to compatibility verification against that revision:
+
+- `height`
+- `head_l`
+- `neck_w`
+- `shoulder_w`
+- `shoulder_incl`
+- `armscye_depth`
+- `arm_length`
+- `arm_pose_angle`
+- `bust`
+- `underbust`
+- `waist`
+- `hips`
+- `leg_circ`
+- `wrist`
+- `back_width`
+- `waist_back_width`
+- `hip_back_width`
+- `waist_line`
+- `waist_over_bust_line`
+- `bust_line`
+- `vert_bust_line`
+- `hips_line`
+- `crotch_hip_diff`
+- `hip_inclination`
+- `bust_points`
+- `bum_points`
+
+Before implementation, pin the GarmentCode commit in `config/app.yaml`. Add a test that loads the exported file with that pinned code. If the schema differs, stop and report the exact difference instead of renaming keys silently.
+
+### 3.3 Additional research measurements
+
+Store the following when the active garment profile needs them, even if they are not primary GarmentCode keys:
+
+- Neck-base circumference.
+- Across-front width.
+- Across-back width.
+- Front waist length.
+- Back waist length.
+- Side waist length.
+- Waist-to-hip length.
+- Bust-point height and separation.
+- Upper-arm circumference.
+- Elbow circumference.
+- Shoulder-to-elbow length.
+- Elbow-to-wrist length.
+- Crotch depth.
+- Total, front, and back crotch lengths.
+- Inseam and outseam.
+- Thigh, knee, calf, and ankle circumferences.
+- Knee and ankle heights.
+- Front/back waist and hip arcs.
+
+These fields belong in `extended_measurements.yaml`. Do not insert unsupported keys into `body_measurements.yaml`.
+
+### 3.4 Body versus design parameters
+
+Body measurements describe the person. Ease, seam allowance, hem allowance, waistband height, garment length, pocket dimensions, sleeve style, collar style, and fit preference are garment-design inputs and must be stored separately in `design_parameters.yaml`.
+
+---
+
+## 4. Required acquisition modes
+
+### 4.1 Two-view core mode
+
+Required for the Montazerian outputs:
+
+- One accepted front image.
+- At least one accepted side image.
+- A second side image is recommended and averaged only after side-orientation checks pass.
+- Measured stature or a known-dimension calibration target for metric scale.
+
+### 4.2 Four-view extended mode
+
+Required for front/back distribution and better landmark review:
+
+- Front.
+- Left side.
+- Back.
+- Right side.
+
+### 4.3 Multi-view mesh mode
+
+Required for measurements whose defensible implementation uses a body surface or planar mesh section:
+
+- 12 guided views at nominal 30-degree intervals, or a guided slow-turn video sampled into equivalent views.
+- Constant camera position and zoom.
+- Constant subject posture.
+- A-pose with visible arms and legs.
+- Known stature or a visible calibration target.
+- Capture-angle metadata for every frame.
+
+The system must show which mode produced each value. Two-view mode must never pretend to provide a validated 3D geodesic.
+
+### 4.4 Scale is not validation ground truth
+
+A measured stature or known calibration target may be used solely to convert pixels to physical units. This is a calibration input, not evidence that the remaining body measurements are accurate.
+
+Supported scale modes:
+
+- `stature`: operator enters stature measured without shoes.
+- `reference_target`: a known-length target is visible in the same approximate body plane.
+
+Do not infer metric scale from camera metadata, assumed camera distance, demographic averages, or image resolution.
+
+---
+
+## 5. Hard constraints
+
+- Python 3.11.
+- CPU-only target: Core i5-class PC with 16 GB RAM.
+- Fully local operation; no cloud APIs, remote inference, analytics, or telemetry.
+- Backend: FastAPI and Uvicorn.
+- Frontend: semantic HTML, CSS, and vanilla JavaScript served by FastAPI; no frontend build step.
+- Canvas is permitted for image overlays and draggable landmarks.
+- Core libraries: `ultralytics`, `opencv-python`, `numpy`, `pyyaml`, `pydantic`, `pytest`, and `ruff`.
+- Optional mesh milestone may add `trimesh`, `scipy`, and `scikit-image`; document why each is needed before installation.
+- GarmentCode/`pygarment` is used only at the pinned revision for compatibility and pattern-load testing.
+- Model paths and SHA-256 hashes are configured; production startup must not download weights.
+- Internal linear unit: millimetres as `float`.
+- Display/export linear unit: centimetres rounded to one decimal; retain unrounded internal values in provenance.
+- Angles are in degrees.
+- Type hints on all functions and public-method docstrings.
+- `ruff check` and `pytest` must pass at each milestone.
+- Never use demographic averages as unlabeled measurements.
+- Never replace a failed calculation with zero.
+- An unavailable result is `null` with a reason.
+
+---
+
+## 6. Repository layout
+
+```text
 bodymeasure/
-├─ AGENT_BRIEF.md
-├─ config/
-│  ├─ app.yaml            # model paths, thresholds, camera index, rotation
-│  ├─ calibration.yaml    # OPTIONAL lens model, written by the monitor tool
-│  └─ schema.yaml         # measurement names, units, which views they need
-├─ src/bodymeasure/
-│  ├─ api.py              # FastAPI routes
-│  ├─ session.py          # session folders, state, export
-│  ├─ preprocess.py       # rotate, undistort (skipped with no lens model)
-│  ├─ vision.py           # YOLO26 seg + pose wrappers (one load, reused)
-│  ├─ posegate.py         # accept/reject a capture, with reasons
-│  ├─ mask_clean.py       # mask clean-up
-│  ├─ landmarks.py        # rows and points from mask + keypoints, and the scale
-│  ├─ geometry.py         # widths, depths, girths, lengths, angles
-│  ├─ measure.py          # landmarks + geometry -> measurements
-│  └─ overlay.py          # debug and review images
-├─ tools/
-│  └─ calibrate_lens_on_monitor.py   # optional, separate milestone
-├─ web/                   # index.html, review.html, app.js, style.css
-├─ tests/
-│  ├─ synthetic/          # generated silhouettes with known answers
-│  └─ test_*.py
-└─ data/                  # git-ignored: sessions/
+├── AGENT_BRIEF.md
+├── README.md
+├── pyproject.toml
+├── config/
+│   ├── app.yaml
+│   ├── calibration.yaml
+│   ├── garmentcode.yaml
+│   └── measurement_schema.yaml
+├── models/                         # provisioned separately; git-ignored
+├── src/bodymeasure/
+│   ├── api.py
+│   ├── config.py
+│   ├── store.py
+│   ├── session.py
+│   ├── preprocess.py
+│   ├── vision.py
+│   ├── pose_gate.py
+│   ├── mask_clean.py
+│   ├── landmarks.py
+│   ├── geometry.py
+│   ├── measure_2d.py
+│   ├── reconstruct.py              # optional multi-view milestone
+│   ├── measure_mesh.py             # optional multi-view milestone
+│   ├── provenance.py
+│   ├── artifacts.py
+│   └── export.py
+├── web/
+│   ├── index.html
+│   ├── review.html
+│   ├── sessions.html
+│   ├── app.js
+│   └── style.css
+├── tools/
+│   ├── calibrate_lens.py
+│   ├── provision_models.py
+│   └── verify_garmentcode.py
+├── tests/
+│   ├── synthetic/
+│   ├── fixtures/
+│   └── test_*.py
+├── scripts/
+│   └── check.sh
+└── data/                            # git-ignored
+    ├── app.db
+    └── sessions/
 ```
 
-## 4. Data contracts
+---
 
-### config/calibration.yaml (optional)
+## 7. Session data contract
+
+Each session uses a UUID4 hex folder; never use a person's name in a path.
+
+```text
+data/sessions/<session_id>/
+├── subject.yaml
+├── views/
+│   ├── front/
+│   │   ├── 00_raw.jpg
+│   │   ├── 01_oriented.png
+│   │   ├── 02_undistorted.png
+│   │   ├── 03_enhanced.png
+│   │   ├── 04_detection.png
+│   │   ├── 05_roi.png
+│   │   ├── 06_mask_raw.png
+│   │   ├── 07_mask_clean.png
+│   │   ├── 08_body_isolated.png
+│   │   ├── 09_edges.png
+│   │   ├── 10_keypoints.png
+│   │   ├── 11_landmarks.png
+│   │   └── 12_measurement_overlay.png
+│   └── <other views use the same stage names>/
+├── predictions/
+│   ├── <view>_detections.json
+│   └── <view>_keypoints.json
+├── landmarks.json
+├── mesh/                            # optional
+│   ├── visual_hull.obj
+│   └── mesh_measurements.json
+├── body_measurements.yaml
+├── extended_measurements.yaml
+├── measurement_report.yaml
+└── manifest.json
+```
+
+Every generated image must be listed in `manifest.json` with:
+
 ```yaml
-camera_matrix: [[fx, 0, cx], [0, fy, cy], [0, 0, 1]]
-dist_coeffs: [k1, k2, p1, p2, k3]
-rotation: 90                       # degrees clockwise applied to raw frames (webcam mounted portrait)
-```
-There is no scale here and no floor mark: the station has neither. If
-`camera_matrix` is missing, frames are measured undistorted and
-`measurement_report.yaml` carries the warning `lens distortion not corrected`.
-Written by `tools/calibrate_lens_on_monitor.py`, which shows a checkerboard on the
-monitor and asks for that screen's visible width in millimetres.
-
-### Session folder `data/sessions/<id>/`
-```
-subject.yaml      # id, sex (M/F/other), height_cm, consent: true, notes
-front.jpg  side_left.jpg  side_right.jpg      # raw captures (side files optional, >= 1 required)
-<view>_mask.png   <view>_kp.json              # model outputs per view
-landmarks.json    # all rows/points used, in image px, editable, plus each view's scale
-body_measurements.yaml    # output for Objective 1.2 (GarmentCode format)
-measurement_report.yaml   # provenance sidecar
-debug/            # overlay PNGs for every step
+stage_id: 07_mask_clean
+view: front
+path: views/front/07_mask_clean.png
+created_at: ISO-8601
+algorithm: clean_person_mask
+parameters:
+  kernel_px: 5
+  max_hole_area_px: 500
+source_files:
+  - views/front/06_mask_raw.png
 ```
 
-### body_measurements.yaml (consumed by pygarment / GarmentCode)
-Top-level key `body:`, flat, centimetres and degrees, **exactly the 26 primary keys** below.
-Do **not** write the underscore keys (`_waist_level`, `_leg_length`, `_bust_line`,
-`_base_sleeve_balance`, `_hip_inclination`, `_shoulder_incl`, `_armscye_depth`):
-pygarment's `BodyParameters` recomputes them every time it loads the file.
+Write files atomically: write a temporary file in the same directory, flush it, then use `os.replace`.
+
+---
+
+## 8. Mandatory visual pipeline
+
+The web app must let the operator inspect the following stages for each view:
+
+1. **Raw capture** — exact camera/upload input; never overwritten.
+2. **Orientation correction** — rotation and side-view mirroring status visible.
+3. **Lens correction** — undistorted image, or a clear `not applied` badge.
+4. **Image enhancement** — the exact image sent to downstream vision; show parameters.
+5. **Human detection** — bounding box, class, confidence, and selected instance.
+6. **Extracted ROI** — cropped person region with coordinates relative to the raw image.
+7. **Raw segmentation mask** — model output before cleanup.
+8. **Cleaned mask** — opening/closing, connected-component filtering, and hole treatment.
+9. **Separated body** — foreground body on a neutral/transparent background.
+10. **Edge/contour image** — final contour used by geometric functions.
+11. **Pose keypoints** — names and confidence values.
+12. **Landmark overlay** — anatomical points and rows used for measurement.
+13. **Measurement overlay** — breadths, depths, paths, arcs, and numeric labels.
+14. **Final measurements** — values, units, provenance, confidence, warning status, and edit status.
+
+### 8.1 UI behavior
+
+- Use a stage timeline or filmstrip plus one large comparison viewer.
+- Provide `Previous`, `Next`, view selector, stage selector, zoom, pan, fit-to-screen, and raw-versus-current comparison.
+- Provide side-by-side and opacity-slider comparison modes.
+- Never stretch an image; preserve the aspect ratio and map overlays through a single coordinate-transform utility.
+- Show loading skeletons while processing and a specific error at the failed stage.
+- A failed stage keeps earlier successful artifacts available.
+- Each stage displays runtime, image dimensions, and relevant parameters in an expandable panel.
+- Do not use stage colors as the only means of communicating status.
+
+---
+
+## 9. Image-processing specification
+
+### 9.1 Preprocessing
+
+For each raw view:
+
+1. Validate MIME type, decode safely, strip nonessential metadata, and enforce configurable size limits.
+2. Apply configured rotation.
+3. Mirror side views into the canonical direction only in a derived artifact; retain raw orientation metadata.
+4. Apply `cv2.undistort` when a valid camera matrix and distortion coefficients exist.
+5. Apply restrained enhancement: configurable white-balance/contrast normalization and edge-preserving denoising. Do not alter body geometry.
+6. Save every stage before proceeding.
+
+Lens calibration must use a printed checkerboard with a known square size and multiple captures spanning the image area and orientations. Reject calibration with insufficient valid frames or unacceptable reprojection error. Calibration estimates lens parameters only; it does not create body scale.
+
+### 9.2 Person segmentation
+
+- Load YOLO26 segmentation once at application startup.
+- Use the configured model, image size, device, and confidence threshold.
+- Keep class `person` only.
+- Default selection: largest accepted person instance.
+- Reject ambiguous frames with multiple similarly sized people rather than guessing.
+- Save bounding boxes, confidence, mask polygon, raw raster mask, and model metadata.
+- Use full-resolution masks when supported.
+
+### 9.3 Mask cleanup
+
+All parameters must be resolution-aware. Store both configured normalized values and resolved pixel values.
+
+1. Morphological opening.
+2. Morphological closing.
+3. Largest connected component.
+4. Fill only holes below the configured normalized area threshold.
+5. Preserve gaps between arms/torso and legs.
+6. Smooth the contour without changing width beyond a configurable pixel tolerance verified by tests.
+
+### 9.4 Pose gate
+
+Use YOLO26 Pose keypoints for capture validation and initialization.
+
+Front-view checks:
+
+- Required head/ear, shoulder, elbow, wrist, hip, knee, and ankle confidence.
+- A-pose arm separation.
+- Wrists do not overlap the torso mask.
+- Both feet and the top of the head are visible.
+- Body is sufficiently centered and occupies the configured height range.
+
+Side-view checks:
+
+- Visible-side shoulder, hip, knee, and ankle confidence.
+- Shoulder-pair projected width below the configured fraction of the accepted front view.
+- Head, torso, legs, and feet not clipped.
+- Side-facing direction can be determined.
+
+Back-view checks:
+
+- Symmetric shoulders and hips within configurable tolerances.
+- Arms separated from torso.
+- Full body visible.
+
+Return structured failures such as:
+
+```json
+{
+  "ok": false,
+  "reasons": [
+    {"code": "WRIST_OVERLAP", "message": "Move the left arm farther from the torso."}
+  ]
+}
+```
+
+---
+
+## 10. Calibration and alignment
+
+Each view has its own `mm_per_px` and physical-height mapping.
+
+For stature scaling:
+
+```text
+mm_per_px = stature_mm / (floor_row - head_row)
+height_above_floor_mm(y) = (floor_row - y) * mm_per_px
+```
+
+Requirements:
+
+- `head_row` and `floor_row` are reviewable and editable.
+- A scale edit invalidates and recomputes every dependent measurement.
+- Front and side rows are matched by physical height above the floor, never by raw pixel row.
+- If scale differs excessively between repeated same-orientation captures, warn and require review.
+- Hair, headwear, shoes, and floor occlusion must generate warnings.
+
+For reference-target scaling, calculate scale from the detected/confirmed target length in the same approximate body plane. Store target endpoints, physical length, and reprojection/placement warning.
+
+---
+
+## 11. Landmark specification
+
+All automatic landmarks are proposals. Store pixel coordinates, physical height, source method, confidence, and operator edits.
+
+### 11.1 Front landmarks
+
+- Head top and floor contact row.
+- Neck-base left/right.
+- Shoulder point left/right.
+- Armpit left/right and armscye row.
+- Chest/bust row.
+- Underbust row.
+- Natural waist row.
+- Maximum hip row.
+- Crotch row.
+- Bust points when visually/algorithmically supported; otherwise operator-required.
+- Elbow and wrist center points.
+- Left/right leg centerlines.
+- Thigh, knee, calf, and ankle rows.
+
+### 11.2 Side landmarks
+
+- Nape.
+- High point shoulder.
+- Balance/coronal line.
+- Front chest/bust prominence.
+- Underbust.
+- Waist indentation.
+- Abdomen prominence.
+- Buttock/maximum-hip prominence.
+- Crotch level.
+- Thigh, knee, calf, and ankle levels.
+- Heel/floor point.
+
+### 11.3 Back landmarks
+
+- Back-neck point.
+- Shoulder points.
+- Across-back level and endpoints.
+- Back waist endpoints.
+- Back hip endpoints.
+- Buttock prominence points when supported; otherwise operator-required.
+
+### 11.4 Editing rules
+
+- Points and horizontal rows are draggable.
+- Path-based measurements expose editable control points.
+- Every edit records old value, new value, timestamp, optional note, and affected measurements.
+- Recompute only the dependency graph downstream of the edited item.
+- Provide `Undo`, `Redo`, and `Reset to automatic` during the current review session.
+
+---
+
+## 12. Geometry specification
+
+`geometry.py` contains pure functions and no file I/O.
+
+Required functions:
+
+```python
+width_at(mask, y, x_ref, mm_per_px) -> float
+split_depth_at(mask, y, balance_x, mm_per_px) -> tuple[float, float]
+euclidean_length(points, mm_per_px) -> float
+polyline_length(points_mm) -> float
+convex_hull_path_length(points_mm) -> float
+ellipse_perimeter_montazerian(a, b) -> tuple[float, str]
+ramanujan_ii(a, b) -> float
+angle_deg(p1, vertex, p2) -> float
+planar_section(mesh, plane_origin, plane_normal) -> Section
+surface_geodesic(mesh, start, end) -> float
+```
+
+### 12.1 Montazerian circumference
+
+For chest, bust, waist, and hip:
+
+1. Obtain front breadth `W` at the accepted anatomical row.
+2. Obtain side depth `D` at the same physical height.
+3. Set ellipse semi-axes `a = max(W, D) / 2` and `b = min(W, D) / 2`.
+4. Apply the same two-equation selection rule documented by Montazerian: use the first selected approximation when `a <= 3b`; use the elongated-ellipse approximation otherwise.
+5. Save the chosen formula identifier and inputs.
+
+Do not replace this with a single formula without an explicit approved change request and regression comparison.
+
+### 12.2 Asymmetric front/back arcs
+
+Where a pattern field requires front/back distribution, use the accepted side balance line to split depth into `d_front` and `d_back`. Compute front and back semi-ellipse arcs separately and save both. Mark these values as method-specific approximations until validated.
+
+### 12.3 Lengths and paths
+
+- Shoulder length: neck-base point to shoulder point, separately left/right.
+- Arm length: shoulder to elbow to wrist polyline, separately left/right.
+- Straight vertical levels: use physical-height differences.
+- Surface-following torso paths: use reviewed silhouette paths in 2D mode or mesh geodesics in mesh mode.
+- Crotch lengths: require a reviewed surface path or mesh geodesic; never infer total crotch length from crotch depth alone.
+
+### 12.4 Limb circumferences
+
+Use paired front breadth and side depth at the same physical height when both are observable. For each thigh, knee, calf, ankle, upper arm, elbow, and wrist result, save whether the cross-section was modeled as an ellipse, circle, planar mesh intersection, or operator input.
+
+---
+
+## 13. Optional multi-view reconstruction
+
+Implement only after the two-view pipeline passes its acceptance tests.
+
+### 13.1 Purpose
+
+The mesh exists to support measurements that depend on surface paths, cross-section planes, front/back distribution, or three-dimensional landmarks. It is not required for the six Montazerian outputs.
+
+### 13.2 Minimum method
+
+- Use calibrated multi-angle silhouettes and known capture angles.
+- Construct a visual hull or equivalent documented mesh approximation.
+- Place the mesh in a common floor-centered metric coordinate system.
+- Remove disconnected artifacts and preserve an untouched reconstruction artifact.
+- Extract planar cross-sections for girths.
+- Compute shortest surface paths only between operator-reviewable anatomical endpoints.
+
+### 13.3 Mesh measurement rules
+
+Follow the GarmentCodeData measurement families:
+
+- Landmark-to-landmark distances for straight measurements.
+- Surface geodesic or optimized polyline for tape-like path measurements.
+- Horizontal planar intersection and closed contour/convex hull for torso and limb girths.
+
+The result record must identify `mesh_visual_hull` or the exact reconstruction method. Do not label visual-hull measurements as scan ground truth.
+
+### 13.4 Failure behavior
+
+If reconstruction is incomplete, non-watertight where a closed section is required, or inconsistent across views:
+
+- Keep all 2D outputs.
+- Set affected mesh outputs to `null`.
+- Show a recapture or manual-entry action.
+- Never interpolate a plausible-looking final value silently.
+
+---
+
+## 14. Measurement provenance contract
+
+Every result uses this structure internally:
+
 ```yaml
+name: waist
+value_mm: 843.27
+value_cm_display: 84.3
+status: acquired
+source: geometric_2d
+method: montazerian_ellipse
+views: [front, side_left, side_right]
+inputs:
+  front_breadth_mm: 286.4
+  side_depth_mm: 221.8
+  row_height_mm: 1012.2
+formula: ellipse_equation_1
+confidence: medium
+validated_against_manual: false
+auto: true
+edited: false
+warnings: []
+```
+
+Allowed `status` values:
+
+- `acquired`
+- `operator_confirmed`
+- `manual_input`
+- `estimated_pending_acceptance`
+- `unavailable`
+- `invalidated`
+
+Allowed `source` values:
+
+- `geometric_2d`
+- `mesh_visual_hull`
+- `operator_input`
+- `derived_pattern_parameter`
+
+The app must visually distinguish confidence from validation. A high-confidence detector output is not a validated anthropometric measurement.
+
+---
+
+## 15. Export contracts
+
+### 15.1 `body_measurements.yaml`
+
+Export only after required fields for the selected pattern profile are present and operator-confirmed.
+
+```yaml
+metadata:
+  session_id: "<uuid>"
+  garmentcode_commit: "<pinned commit>"
+  unit: cm
+  validation_status: unvalidated_against_manual_anthropometry
 body:
+  height: 171.0
+  head_l: null
+  neck_w: 18.9
+  shoulder_w: 36.5
+  shoulder_incl: 21.7
+  armscye_depth: 12.9
   arm_length: 53.0
   arm_pose_angle: 45.5
-  armscye_depth: 12.9
-  back_width: 47.7
-  bum_points: 18.2
   bust: 99.8
-  bust_line: 25.7
-  bust_points: 16.9
-  crotch_hip_diff: 8.8
-  head_l: 26.3
-  height: 171.0
-  hip_back_width: 54.8
-  hip_inclination: 9.9
-  hips: 103.0
-  hips_line: 23.5
-  leg_circ: 60.2
-  neck_w: 18.9
-  shoulder_incl: 21.7
-  shoulder_w: 36.5
   underbust: 86.2
-  vert_bust_line: 21.1
   waist: 84.3
+  hips: 103.0
+  leg_circ: 60.2
+  wrist: 16.6
+  back_width: 47.7
   waist_back_width: 39.1
+  hip_back_width: 54.8
   waist_line: 36.9
   waist_over_bust_line: 40.6
-  wrist: 16.6
+  bust_line: 25.7
+  vert_bust_line: 21.1
+  hips_line: 23.5
+  crotch_hip_diff: 8.8
+  hip_inclination: 9.9
+  bust_points: null
+  bum_points: null
 ```
 
-### measurement_report.yaml (for the tailor and for Objective 2)
-```yaml
-subject_id: S014
-side_views_used: [left, right]
-values:
-  waist:      {source: geometric, confidence: medium, edited: false, views: [front, side_left, side_right]}
-  height:     {source: tailor_input, confidence: high, edited: false, views: [front]}
-  bust_points: {source: default_ratio, confidence: estimated, edited: false}
-warnings:
-  - "waist depth differs 1.4 cm between left and right side views"
-  - "lens distortion not corrected"
-```
+The example values are schema illustrations only and must never be emitted as defaults.
 
-## 5. Algorithm specification (implement exactly; ask before deviating)
+### 15.2 `measurement_report.yaml`
 
-### 5.1 Preprocess
-1. Rotate the raw frame by `rotation`, then `cv2.undistort` with the stored lens
-   model. With no `camera_matrix`, skip the undistortion: the report carries
-   `lens distortion not corrected` and the scale is unaffected.
+Include:
 
-### 5.2 Pose gate (`posegate.py`) - return `(ok: bool, reasons: list[str])`
-Use COCO-17 keypoints (0 nose, 1/2 eyes, 3/4 ears, 5/6 shoulders, 7/8 elbows,
-9/10 wrists, 11/12 hips, 13/14 knees, 15/16 ankles).
-- Front: confidence >= 0.5 (from app.yaml) on the keypoints that are actually
-  measured - ears, shoulders, elbows, wrists, hips. The face and the legs are
-  not measured off keypoints, so they do not gate.
-- Front: each upper arm 15-60 degrees from the torso line (A-pose). Wrists must not overlap the torso mask.
-- Side: the visible side's shoulder, hip, knee and ankle confidence >= 0.5. The
-  shoulder-to-shoulder horizontal distance must be < 25% of the front view's (truly side-on).
-- Every view: top and bottom margins each >= 2% of the frame height (enough to
-  prove the body is not cut off, since the scale is its head-to-floor span), the
-  mask spanning >= 60% of the frame height, and the body's horizontal centre
-  within the middle 30% of the frame width. There is no floor mark to stand on.
-- The reasons are shown to the operator verbatim, e.g. "Left arm too close to body".
+- Model names, versions, hashes, thresholds, and runtime.
+- Lens-calibration identity and reprojection error.
+- Scale method and inputs.
+- Every measurement provenance record.
+- Automatic and edited landmarks.
+- Warnings and failed quality checks.
+- `validated_against_manual: false` until a validation dataset exists.
+- Links/relative paths to all visual artifacts.
 
-### 5.3 Mask clean-up (`mask_clean.py`)
-1. Keep the person instance with the largest area (class 0, conf >= 0.5).
-   Use `retina_masks=True` and `imgsz` from app.yaml (default 1280).
-2. Morphological opening, then closing, with a 5 px elliptical kernel.
-3. Keep the largest connected component.
-4. Fill only holes smaller than 500 px² (gaps between arm and torso or between the legs
-   are larger and must remain background).
+### 15.3 Export gate
 
-### 5.4 Scale, heights and view alignment
-- Each view carries its **own** scale, from the subject's measured height:
-  `floor_row` = the lowest foreground row of that view's mask, `head_row` = the
-  highest, and `mm_per_px = height_cm * 10 / (floor_row - head_row)`.
-- Height of image row `y` above the floor, on the view that owns the row:
-  `h_mm = (floor_row - y) * mm_per_px`.
-- Front and side rows are matched by `h_mm`, never by pixel row, so the two views
-  need not be the same size in the frame.
-- `head_row` is a draggable landmark: dragging it down over hair or a cap
-  recomputes that view's scale and every measurement from that view.
-- Side facing direction: the nose keypoint x relative to the visible ear's x. Mirror
-  a side image if needed so the body always faces right before landmarking.
+Pattern-ready export is blocked when:
 
-### 5.5 Landmarks (`landmarks.py`)
-Definitions follow the GarmentCode measurement sheet (`docs/Body Measurements GarmentCode.pdf`
-in the GarmentCode repository). "Torso run" at row y means the contiguous foreground run
-that contains `torso_x`, the midpoint of the two hip keypoints' x.
+- A required field is `null`, `unavailable`, or `invalidated`.
+- An `estimated_pending_acceptance` value has not been accepted.
+- A required source view failed its quality gate.
+- The GarmentCode compatibility test fails.
 
-Front view:
-- **Head row**: smallest y of the mask (the scale row; see 5.4).
-- **Floor row**: largest y of the mask.
-- **Neck-base row**: the row where the neck widens into the shoulders. Find the row of minimum
-  mask width between the ear row and the shoulder-keypoint row, then move down to the first row
-  where the width exceeds that minimum by 25%. **Neck-base side points (L/R)** are the run's
-  ends on that row.
-- **Shoulder points (L/R)**: on the outer contour between the neck-base row and 10% of
-  shoulder-to-hip distance below the shoulder keypoint, the point of maximum turning angle
-  (curvature over ±15 contour points). These are proxies for the collarbone ends.
-- **Armpit row**: the first row below the shoulder keypoints where background appears between
-  arm and torso on both sides.
-- **Waist row**: the row of minimum torso-run width between 30% and 90% of the span from the
-  armpit row to the hip-keypoint row.
-- **Crotch row**: the first row below the hip keypoints where background appears between the legs.
-- **Wrist points (L/R)**: the narrowest arm cross-section within ±4 cm of each wrist keypoint,
-  measured perpendicular to the elbow-wrist line.
+Allow report export at any time, including partial/failed sessions.
 
-Side view (body faces right after mirroring, see 5.4):
-- **Balance line**: the line through the side-view shoulder keypoint and hip keypoint,
-  evaluated at each row. It splits every row into a front depth `d_f` and a back depth `d_b`.
-  This is a proxy for GarmentCode's coronal "balance line". Make the line selectable in the
-  review UI.
-- **Nape point**: on the back contour between the ear row and the shoulder-keypoint row,
-  the point of maximum turning angle (neck-to-back junction).
-- **High point shoulder (HPS)**: the point on the top contour of the shoulder where it crosses
-  the balance line.
-- **Bust row**: the row of maximum `d_f` between the armpit row and the waist row.
-- **Underbust row**: the row of minimum `d_f` between the bust row and the waist row
-  (for flat chests it falls close to the bust row; that is expected).
-- **Hip row**: the row of maximum `d_b` (buttock prominence) between the waist row and the crotch row.
-- **Thigh rows**: every row from the crotch row to crotch + 10 cm.
+---
 
-Store every landmark in `landmarks.json` as `{name, view, x, y, auto: true}`,
-beside a per-view record of the `floor_row`, `head_row` and `mm_per_px` they
-imply. The rows are the single source of truth; the scale beside them is what
-those rows give.
+## 16. Web application specification
 
-### 5.6 Geometry (`geometry.py`) - pure functions, no I/O
-- `width_at(mask, y, x_ref, mm_per_px) -> mm`: length of the run containing `x_ref` × `mm_per_px`.
-- `split_depth_at(side_mask, h_mm, balance_x) -> (d_f, d_b)` in mm.
-- `ellipse_perimeter(a, b)`: Ramanujan II,
-  `P = π(a+b)(1 + 3h / (10 + sqrt(4 - 3h)))`, `h = (a-b)² / (a+b)²`.
-- **Two-semi-ellipse girth** (the body is not front-back symmetric):
-  `a = width / 2`, `front_arc = P(a, d_f) / 2`, `back_arc = P(a, d_b) / 2`,
-  `girth = front_arc + back_arc`. The `*_back_width` measurements are `back_arc`.
-- `contour_length(points)`: polyline length in mm. `hull_length(points)` is the same but taken
-  on the convex hull of the points (tape-measure behaviour over hollows).
-- If two side views exist, average `d_f` and `d_b` row by row. Add a warning if the
-  girths they give differ by more than 10 mm.
+### 16.1 Capture page
 
-### 5.7 Measurements (`measure.py`): the 26 GarmentCode keys
-F = front view, S = side view. Confidence goes into `measurement_report.yaml`.
+Show:
 
-| key | view | method | confidence |
-|---|---|---|---|
-| height | F | the tailor's measured `height_cm`, verbatim | high |
-| head_l | S | straight distance from the nape point to the head top | medium |
-| neck_w | F | distance between the neck-base side points | medium |
-| shoulder_w | F | distance between the two shoulder points | medium |
-| shoulder_incl | F | angle above horizontal of neck-base side point → shoulder point, mean L/R | medium |
-| armscye_depth | F | shoulder-point height minus armpit-row height, mean L/R | medium |
-| arm_length | F | shoulder point → elbow kp → wrist kp polyline, mean L/R | medium |
-| arm_pose_angle | F | angle of shoulder→elbow below horizontal, mean L/R (a pose value, not a size) | high |
-| bust | F+S | two-semi-ellipse girth at bust row | medium |
-| underbust | F+S | two-semi-ellipse girth at underbust row | low |
-| waist | F+S | two-semi-ellipse girth at waist row | medium |
-| hips | F+S | two-semi-ellipse girth at hip row | medium |
-| leg_circ | F+S | maximum over thigh rows of a one-leg ellipse girth (front run of one leg, side leg depth) | medium |
-| wrist | F | π × narrowest wrist width (circle) | low |
-| back_width | F+S | back_arc at bust row | low |
-| waist_back_width | F+S | back_arc at waist row | low |
-| hip_back_width | F+S | back_arc at hip row | low |
-| waist_line | S | back contour length from nape point down to the waist row | medium |
-| waist_over_bust_line | S | hull_length of the front contour from HPS to the waist row | low |
-| bust_line | S | the same path, from HPS to the bust row | low |
-| vert_bust_line | S | nape height minus bust-row height | medium |
-| hips_line | F+S | waist-row height minus hip-row height | medium |
-| crotch_hip_diff | F+S | hip-row height minus crotch-row height | medium |
-| hip_inclination | F | angle from vertical of the torso side edge from waist row to hip row, mean L/R | medium |
-| bust_points | — | not visible in a silhouette: tailor enters it; default 0.170 × bust | estimated |
-| bum_points | — | not visible in a silhouette: tailor enters it; default 0.176 × hips | estimated |
+- Consent checkbox and consent-version text.
+- Subject code, not full name.
+- Scale-mode selector.
+- Stature or reference-target input as applicable.
+- Garment profile selector: core upper body, top/shirt, skirt, trousers/cargo, or full pattern set.
+- Live preview with pose guide and framing boundaries.
+- Capture buttons for required views with a three-second countdown.
+- Upload alternative for every view.
+- Gate result and specific retake instructions.
+- Capture-progress indicator.
 
-The two default ratios come from GarmentCode's `mean_all.yaml` (16.95 / 99.84 and
-18.23 / 103.48). The review UI must highlight every `estimated` and `low` value.
+Instructions must include fitted clothing, shoes removed, hair controlled, uncluttered background, consistent posture, and stable camera.
 
-`measure.py` takes `landmarks.json` as input, so the review UI can edit landmarks and call it
-again. Round every output to 1 decimal.
+### 16.2 Processing page
 
-## 6. Web app pages and API
+Show one processing step at a time as it completes:
 
-Pages:
-1. `/` (capture): consent checkbox, subject ID, sex, **height in cm** with the hint
-   "Measured by tailor, shoes off. Do not use the client's own estimate." Live preview at the
-   camera's full resolution (`getUserMedia` with ideal 1920×1080), with the capture
-   instructions on screen - shoes off, hair tied flat or a tight cap, fitted clothing, A-pose -
-   and a guide box showing the gate's bounds. Buttons: Capture Front, Capture Left,
-   Capture Right, with a 3-second countdown. After each capture the server runs the pose
-   gate. Show ✓, or the reasons with a Retake button. "Measure" is enabled once front plus
-   at least one side pass.
-2. `/review/<id>`: front and side images with mask outline, slice lines and points. Lines
-   and points are draggable, including `head_row`, which sets that view's scale. Each drag
-   calls the recompute endpoint and updates the table. Each value is editable with a note,
-   which sets `edited: true`. Values marked `estimated` or `low` are highlighted, and
-   `bust_points` / `bum_points` show an input box. Buttons: Export YAML, Delete session.
+- Stage timeline.
+- Raw and current images.
+- Per-stage status, runtime, dimensions, and parameters.
+- Retry from failed stage.
+- Cancel processing.
 
-API (JSON in and out; images as multipart):
-```
-POST   /api/sessions                        {subject_id, sex, consent, height_cm} -> {id}
-POST   /api/sessions/{id}/views/{view}      view in {front, side_left, side_right}; image -> gate result
-POST   /api/sessions/{id}/measure           -> landmarks + measurements
-PUT    /api/sessions/{id}/landmarks         edited landmarks -> recomputed measurements
-GET    /api/sessions/{id}/overlay/{view}    PNG
-GET    /api/sessions/{id}/export            body_measurements.yaml
-GET    /api/sessions/{id}/report            measurement_report.yaml
+Do not hide intermediate images after completion.
+
+### 16.3 Review page
+
+Desktop layout:
+
+- Left: view selector and preprocessing stage filmstrip.
+- Center: large zoomable image/canvas with overlays.
+- Right: measurement table and provenance/details drawer.
+
+Mobile layout:
+
+- Stacked viewer, stage selector, and measurement cards.
+- Sticky primary action that does not obscure content.
+- Minimum 44-by-44-pixel touch targets.
+
+Review functions:
+
+- Toggle mask, contour, keypoints, landmark names, slice rows, paths, and values.
+- Drag landmarks and rows.
+- Compare automatic versus edited result.
+- Filter measurements by core, torso, arm, lower body, mesh, warning, or missing.
+- Display raw value, final value, unit, method, views, confidence, and validation status.
+- Require a note for direct numeric overrides.
+- Confirm measurements before pattern export.
+
+### 16.4 Final measurement display
+
+The results area must have:
+
+1. **Montazerian core measurements** prominently displayed.
+2. **Pattern-ready body parameters** grouped by torso, arms, and lower body.
+3. **Additional research measurements** in a separate expandable section.
+4. Missing/blocked measurements with an actionable reason.
+5. Export buttons for YAML, CSV, and provenance report.
+
+Use tabular numerals. Do not imply medical or diagnostic use.
+
+### 16.5 Accessibility and visual design
+
+- Semantic HTML and one logical `h1` per page.
+- Keyboard operation for capture, stage navigation, overlay toggles, and landmark editing alternatives.
+- Visible focus states and WCAG AA text contrast.
+- Light and dark themes.
+- Body text at least 16 px; metadata at least 12 px.
+- Responsive behavior from 375 px through desktop widths.
+- Neutral surfaces with one restrained accent color.
+- No decorative gradients, irrelevant imagery, or icon-only actions without labels/tooltips.
+- Respect `prefers-reduced-motion`.
+
+---
+
+## 17. API
+
+```text
+POST   /api/sessions
+GET    /api/sessions
+GET    /api/sessions/{id}
 DELETE /api/sessions/{id}
+
+POST   /api/sessions/{id}/views/{view}
+GET    /api/sessions/{id}/views/{view}/gate
+POST   /api/sessions/{id}/process
+GET    /api/sessions/{id}/process/status
+
+GET    /api/sessions/{id}/artifacts
+GET    /api/sessions/{id}/artifacts/{view}/{stage_id}
+
+GET    /api/sessions/{id}/landmarks
+PUT    /api/sessions/{id}/landmarks
+POST   /api/sessions/{id}/landmarks/reset
+
+GET    /api/sessions/{id}/measurements
+PUT    /api/sessions/{id}/measurements/{name}
+POST   /api/sessions/{id}/measurements/recompute
+POST   /api/sessions/{id}/confirm
+
+GET    /api/sessions/{id}/export/body
+GET    /api/sessions/{id}/export/extended
+GET    /api/sessions/{id}/export/report
+GET    /api/sessions/{id}/export/csv
 ```
-Also accept an **image upload** in place of the webcam on the capture page, so the demo
-works without the station.
 
-## 7. Milestones (stop after each one)
+Rules:
 
-**M0 - Skeleton.** Repo layout, config loading, FastAPI serving an empty page, `pytest`
-and `ruff` passing in CI-style script `scripts/check.sh`.
+- JSON for metadata; multipart upload for images.
+- Validate session ownership/existence and legal state transitions.
+- Prevent path traversal by resolving every path beneath the configured data root.
+- Enforce upload size and pixel-count limits.
+- Return structured error codes and human-readable messages.
+- Never include stack traces in production responses.
 
-**M1 - Geometry with synthetic tests.** `geometry.py` + `tests/synthetic/` generator:
-draw front and side silhouettes of stacked ellipses (known widths and depths) at a known
-mm/px. Tests: `ellipse_perimeter(a, a) == 2πa` to 1e-9; it matches numerical
-integration within 0.01% for b/a in [0.3, 1]; `width_at` and `depth_at` recover the drawn
-sizes within 1 px; `split_depth_at` recovers asymmetric front/back depths within 1 px.
+---
 
-**M2 - Optional lens calibration (separate milestone).** `tools/calibrate_lens_on_monitor.py`:
-draw a checkerboard on the station monitor, ask for the screen's visible width in mm, fit
-`camera_matrix` / `dist_coeffs` with `cv2.calibrateCamera`. There is no scale step and no
-calibration page.
+## 18. Storage and privacy
 
-**M3 - Vision + pose gate + clean-up.** YOLO26 wrappers (models loaded once at startup),
-`posegate.py`, `mask_clean.py`, debug overlays. Report CPU time per image.
+Use SQLite from the Python standard library for session index, consent, status, and edit audit. Store images and YAML/JSON files on disk; never store image blobs in SQLite.
 
-**M4 - Landmarks + measurements.** `landmarks.py`, `measure.py`, end-to-end on uploaded
-images, overlay PNGs for every landmark. Synthetic-figure tests where landmark rows are known.
+Minimum tables:
 
-**M4b - GarmentCode bench test.** Clone the GarmentCode repository (MIT licence) and use
-`assets/bodies/mean_all.obj`, `mean_female.obj`, `mean_male.obj` and the two
-`*_smpl_average_A40.obj` bodies, each with its `.yaml` of true measurements. Write
-`bench/render_silhouettes.py` (trimesh): render front and side binary silhouettes with an
-orthographic projection at 1 mm/px, feet on a fixed floor row. Run the engine on them
-(keypoints from YOLO26-pose on a plain grey rendering, or from mesh joints if that fails) and
-write `bench/results.csv`: key, true, measured, error. **Report the errors; do not tune
-thresholds to fit these five bodies.** Also check that pygarment's `BodyParameters` loads
-every exported file without error.
+- `schema_version`
+- `sessions`
+- `edits`
+- `deletions`
 
-**M5 - Capture UI.** Webcam capture flow, countdown, gate feedback, retake.
+Requirements:
 
-**M6 - Review UI.** Draggable landmarks, recompute, edit values, export, delete.
+- SQLite WAL mode and foreign keys enabled.
+- All database access through `store.py`.
+- Session deletion removes files, session row, and edit rows, then retains only a non-personal deletion event.
+- Configurable image-retention interval.
+- Unconfirmed abandoned sessions have a shorter configurable retention interval.
+- Do not log subject codes, body values, image paths, or images.
+- No network synchronization.
+- Document encrypted-disk and backup requirements.
+- Deleting a session must be idempotent and recover cleanly from partial filesystem failure.
 
-## 8. Definition of done (whole demo)
+---
 
-- Front plus one side, and front plus both sides, both produce body_measurements.yaml
-  (26 keys, loadable by pygarment) and measurement_report.yaml.
-- Every measurement in the table has a debug overlay showing where it was taken.
-- Dragging a landmark changes only the measurements that depend on it; dragging
-  `head_row` rescales that view.
-- A synthetic figure redrawn at any size and offset measures the same when
-  `height_cm` matches what was drawn, and a +1 cm height error moves the waist by
-  about `waist / height`.
-- `scripts/check.sh` passes (ruff + pytest).
-- README: setup, how the scale works, capture procedure (shoes off, hair tied
-  flat, fitted clothing, A-pose), and known limitations.
+## 19. Validation plan without manual ground truth
 
-## 9. When unsure
+Until standardized manual measurements exist, separate verification into three layers.
 
-Do not guess. Stop and ask about anything not specified here, especially
-landmark definitions, thresholds, or new dependencies. List the assumption
-you would make, and wait for confirmation.
+### 19.1 Mathematical verification
 
-## 10. Storage (add to Milestone 0)
+- Circle case for each ellipse formula.
+- Comparison with numerical ellipse perimeter integration.
+- Known widths, depths, path lengths, and angles on synthetic masks.
+- Invariance to image offset and proportional resizing when scale is updated consistently.
 
-### 10.1 Approach
-- Files on disk hold the large and pipeline-facing data. A single SQLite database
-  (`data/app.db`, Python stdlib `sqlite3`, no ORM, no server) holds the index, consent and audit trail.
-- Never store images or YAML contents inside the database. Store only paths relative to `data/`.
-- All database access goes through `src/bodymeasure/store.py`. No other module opens
-  `app.db` or deletes session folders.
+### 19.2 Known-object verification
 
-### 10.2 Files (unchanged from section 4)
-data/sessions/<session_id>/
-  subject.yaml, front.jpg, side_left.jpg, side_right.jpg,
-  <view>_mask.png, <view>_kp.json, landmarks.json,
-  body_measurements.yaml, measurement_report.yaml, debug/
+Use calibrated rectangular, circular, cylindrical, and elliptical objects plus a mannequin/dress form with independently known dimensions. Report absolute error and repeated-capture variation. Do not generalize object results to human accuracy.
 
-- `session_id` = UUID4 hex. Never put the subject's name in a path or file name.
-- Write every file atomically: write `<name>.tmp`, then `os.replace` it to the final name.
+### 19.3 Repeatability
 
-### 10.3 Database schema (create on startup if missing)
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
+For each consenting participant or mannequin:
 
-CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
+- At least three complete recaptures with repositioning.
+- Report mean, standard deviation, range, and coefficient of variation per measurement.
+- Treat repeatability as precision only, not accuracy.
 
-CREATE TABLE IF NOT EXISTS sessions (
-  id              TEXT PRIMARY KEY,           -- UUID4 hex = folder name
-  subject_code    TEXT NOT NULL,              -- tailor's client code, not a full name
-  sex             TEXT CHECK (sex IN ('M','F','other')),
-  height_cm       REAL NOT NULL,                 -- the measured height every view is scaled by
-  consent_at      TEXT NOT NULL,              -- ISO 8601, Asia/Manila
-  consent_version TEXT NOT NULL,              -- version of the consent form text shown
-  created_at      TEXT NOT NULL,
-  status          TEXT NOT NULL CHECK (status IN
-                    ('capturing','measured','confirmed','exported')),
-  views           TEXT NOT NULL DEFAULT '[]', -- JSON list, e.g. ["front","side_left"]
-  confirmed_at    TEXT,
-  images_purge_after TEXT                     -- date after which photos and masks are deleted
-);
+### 19.4 Later human validation
 
-CREATE TABLE IF NOT EXISTS edits (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  at          TEXT NOT NULL,
-  kind        TEXT NOT NULL CHECK (kind IN ('landmark','value')),
-  target      TEXT NOT NULL,                  -- landmark name or measurement key
-  old_value   TEXT,                           -- JSON
-  new_value   TEXT,                           -- JSON
-  note        TEXT
-);
+Prepare the schema to add standardized manual references later. The future protocol should use trained measurers, repeated readings, agreed anatomical definitions, and agreement/error analysis. Do not add a manual-reference value to the current dataset unless its collection protocol is recorded.
 
-CREATE TABLE IF NOT EXISTS deletions (        -- no personal data, by design
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id  TEXT NOT NULL,                  -- no foreign key: the session row is gone
-  at          TEXT NOT NULL,
-  scope       TEXT NOT NULL CHECK (scope IN ('session','images')),
-  reason      TEXT NOT NULL CHECK (reason IN ('user_request','retention'))
-);
+---
 
-### 10.4 store.py functions (type-hinted, each with a pytest test)
-create_session(subject_code, sex, consent_version, height_cm) -> str
-add_view(session_id, view) -> None
-set_status(session_id, status) -> None
-log_edit(session_id, kind, target, old, new, note) -> None
-list_sessions(status: str | None = None) -> list[dict]
-delete_session(session_id, reason) -> None
-    # delete the folder, then the row, then insert into deletions,
-    # all inside one transaction; if the folder delete fails, roll back.
-purge_images(today) -> int
-    # for sessions whose images_purge_after <= today: delete the photos, masks and debug/
-    # but keep landmarks.json and both YAML files; log scope='images'.
-export_csv(path) -> None
-    # one row per confirmed session: session_id, subject_code, sex, then the 26 GarmentCode
-    # keys, then edited flags. Used for Objective 2 analysis.
+## 20. Testing requirements
 
-### 10.5 Configuration (config/app.yaml)
-storage:
-  data_dir: data
-  retention_days_images: 30       # placeholder; set from the client agreement
-  purge_on_startup: true          # run purge_images() whenever the app starts
-  keep_debug_after_confirm: false # delete debug/ once a session is confirmed
+### 20.1 Unit tests
 
-`images_purge_after` = confirmed_at + retention_days_images.
-Sessions that were never confirmed are purged 7 days after created_at.
+- Geometry formulas and degenerate inputs.
+- Pixel/metric transforms.
+- Physical-height row matching.
+- Connected-component and hole-filling behavior.
+- Measurement dependency graph.
+- Null propagation and export gates.
+- Atomic writes and path safety.
+- Database state transitions and deletion.
 
-### 10.6 API additions
-GET    /api/sessions?status=confirmed   -> list from store.list_sessions
-GET    /api/export.csv                  -> store.export_csv
-DELETE /api/sessions/{id}               -> store.delete_session(reason='user_request')
+### 20.2 Synthetic visual tests
 
-### 10.7 Rules
-- Do not log subject codes, measurements or image paths to the console or log files;
-  log only session_id and event names.
-- No network sync, cloud backup or telemetry. Backup = copying the whole data/ folder,
-  documented in the README.
-- README section "Data protection": the station disk must be encrypted
-  (BitLocker on Windows), and the retention period must match the client's consent form.
+Generate silhouettes with known:
 
-### 10.8 Tests
-- Creating, editing, confirming and deleting a session leaves no folder, no sessions row,
-  no edits rows, and exactly one deletions row.
-- purge_images deletes the photos but keeps body_measurements.yaml.
-- A crash simulated mid-write (exception after the .tmp write) leaves the previous file intact.
-- export_csv output contains no rows for unconfirmed sessions.
+- Torso widths and depths at chest, bust, waist, and hip.
+- Asymmetric front/back depths.
+- Shoulder slopes.
+- Arm segments.
+- Crotch and leg levels.
+- Limb cross-sections.
+
+Save expected-versus-actual overlay images as test artifacts.
+
+### 20.3 Integration tests
+
+- Uploaded front plus side produces all eligible core outputs.
+- Front plus both sides records bilateral differences and averages only valid values.
+- Four-view mode enables front/back-distribution fields.
+- Multi-view failure does not destroy valid two-view outputs.
+- Landmark edits recompute only dependent measurements.
+- Every displayed stage corresponds to a manifest entry and readable file.
+- Export is blocked for unresolved required fields.
+- Export loads in the pinned GarmentCode revision.
+
+### 20.4 UI tests
+
+At minimum, manually verify at 375 px and 1280 px:
+
+- Capture/upload flow.
+- Stage gallery, zoom, comparison, and error recovery.
+- Landmark review with keyboard alternative.
+- Measurement filtering and provenance drawer.
+- Light/dark modes.
+- No clipped controls or horizontal page overflow.
+
+### 20.5 Performance tests
+
+Record on the target CPU:
+
+- Model initialization time.
+- Segmentation time per view.
+- Pose time per view.
+- Artifact-generation time.
+- Measurement recomputation time after one landmark edit.
+- Multi-view reconstruction time when enabled.
+
+Do not invent a passing time threshold. Establish the baseline in Milestone 2, then obtain approval for thresholds.
+
+---
+
+## 21. Milestones
+
+### M0 — Skeleton and storage
+
+- Repository structure.
+- Configuration validation.
+- FastAPI health endpoint and static page.
+- SQLite schema and session lifecycle.
+- Atomic file helper.
+- `scripts/check.sh` running `ruff` and `pytest`.
+
+Stop and report.
+
+### M1 — Design-system proof and UI shell
+
+- Create a temporary design-system page with typography, surfaces, controls, image viewer, measurement table, light/dark themes, and contrast checks.
+- Validate at mobile and desktop widths.
+- Carry approved tokens into the app and remove the temporary page.
+- Build nonfunctional capture, processing, and review shells.
+
+Stop and report screenshots and accessibility checks.
+
+### M2 — Vision and visual artifacts
+
+- Model provisioning and hash verification.
+- Image ingestion, orientation, optional undistortion, enhancement.
+- YOLO26 segmentation and pose wrappers loaded once.
+- Pose gate and mask cleanup.
+- Save and display stages 00 through 10.
+- Record CPU baseline.
+
+Stop and provide one complete artifact sequence per view.
+
+### M3 — Core Montazerian geometry
+
+- Scale and physical-height alignment.
+- Editable core landmarks.
+- Shoulder and arm lengths.
+- Chest, bust, waist, and hip breadth/depth pairing.
+- Montazerian two-equation ellipse logic.
+- Core result panel and provenance.
+- Synthetic tests.
+
+Stop and report formulas, artifacts, and tests.
+
+### M4 — Extended 2D measurements
+
+- Neck, shoulder, armscye, torso-path, wrist, thigh/leg, and front/back-arc methods supported by the accepted views.
+- Jin-style lower-body side landmarks.
+- Operator review and dependency-based recomputation.
+- `extended_measurements.yaml`.
+
+Stop and list acquired, manual-required, and unavailable fields.
+
+### M5 — Multi-view mesh
+
+- Guided multi-angle capture.
+- Reconstruction, mesh QA, and mesh viewer/download.
+- Planar sections and surface paths.
+- GarmentCodeData-style measurement methods.
+- Graceful failure with 2D fallback.
+
+Stop and provide mesh-quality diagnostics and comparison against synthetic/known geometry.
+
+### M6 — Final review and export
+
+- Full preprocessing timeline.
+- Draggable landmarks and path controls.
+- Numeric override with mandatory note.
+- Confirmation flow.
+- YAML/CSV/report export.
+- Pinned GarmentCode load test.
+
+Stop and report end-to-end results.
+
+### M7 — Privacy, retention, and hardening
+
+- Retention task.
+- Idempotent deletion.
+- Upload hardening and path tests.
+- Production error handling.
+- README deployment, privacy, calibration, capture, and limitations sections.
+
+Stop and run the full definition-of-done checklist.
+
+---
+
+## 22. Definition of done
+
+The prototype is complete only when:
+
+- Raw images are preserved and visible.
+- Every required preprocessing stage is generated, manifested, and viewable.
+- The final six Montazerian core measurements are displayed with their intermediate dimensions and formula provenance.
+- Extended measurements clearly state whether they came from 2D geometry, mesh geometry, operator input, or remain unavailable.
+- Every measurement has a visual overlay or an explicit explanation of why no 2D overlay applies.
+- Landmark edits recompute the correct dependent measurements.
+- Missing values are never silently replaced.
+- Pattern-ready export is schema-valid and loads with the pinned GarmentCode revision.
+- The interface works at 375 px and 1280 px, in light and dark themes, with keyboard access.
+- Session deletion and retention tests pass.
+- `ruff check` and `pytest` pass.
+- Runtime is reported on the target CPU.
+- README states that current outputs are not validated against standardized manual anthropometry.
+- README documents capture protocol, scale method, lens calibration, formulas, assumptions, limitations, privacy, and later validation plan.
+
+---
+
+## 23. Prohibited shortcuts
+
+Do not:
+
+- Hide or overwrite preprocessing artifacts.
+- Treat a detection confidence score as measurement accuracy.
+- Claim Montazerian's reported error for this implementation.
+- Use image width, EXIF focal length, or assumed distance as metric scale.
+- Use pose joints as exact tailoring landmarks without review.
+- Infer crotch paths from one vertical distance.
+- Export demographic means as acquired measurements.
+- Fill missing values with zero.
+- Couple body measurement code to garment style/ease parameters.
+- Download models or datasets during normal app startup.
+- Continue to the next milestone without approval.
+
+When uncertain, stop, identify the exact unresolved requirement, state the assumption the code would otherwise make, and wait for confirmation.
