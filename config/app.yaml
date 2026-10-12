@@ -3,6 +3,8 @@
 camera:
   index: 0
   rotation: 90          # degrees clockwise applied to raw frames
+  pad_frac: 0.08        # grey border added after rotation, as a fraction of the long side,
+                        # so a body filling a tight room is not read as cut off
 
 models:
   seg: models/yolo26s-seg.pt
@@ -17,7 +19,7 @@ thresholds:
   arm_angle_max_deg: 60
   side_shoulder_ratio_max: 0.25   # side view is side-on when shoulder span < 25% of front
   frame_margin_frac: 0.02         # mask must sit this far inside top and bottom
-  body_height_frac: 0.60          # and span at least this much of the frame height
+  body_height_frac: 0.50          # and span at least this much of the padded frame height
   body_centre_band_frac: 0.30     # body centre must fall inside the middle of the width
   morph_kernel_px: 5
   hole_fill_max_area_px: 500

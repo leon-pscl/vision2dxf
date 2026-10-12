@@ -18,10 +18,11 @@ class _Strict(BaseModel):
 
 
 class CameraConfig(_Strict):
-    """Webcam index and the rotation applied to every raw frame."""
+    """Webcam index, the rotation applied to every raw frame, and its border."""
 
     index: int
     rotation: int
+    pad_frac: float = 0.08
 
 
 class ModelsConfig(_Strict):

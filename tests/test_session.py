@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import yaml
-from tests.synthetic.people import make_person, make_side
+from tests.synthetic.people import as_captured, make_person, make_side
 
 from bodymeasure import session as session_module
 from bodymeasure import store
@@ -54,10 +54,11 @@ def station(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object
     store.initialise()
 
     def fake_analyse(image: np.ndarray) -> ViewAnalysis:
-        """Return the figure whose silhouette matches the image size and ink."""
+        """Return the figure whose silhouette matches the padded image."""
         for figure in (front, *sides.values()):
-            if np.array_equal(image, _photo(figure.mask)):
-                return ViewAnalysis(figure.mask, figure.keypoints, 1.0, 1.0)
+            if np.array_equal(image, as_captured(_photo(figure.mask))):
+                mask, keypoints = as_captured(figure.mask, figure.keypoints)
+                return ViewAnalysis(mask, keypoints, 1.0, 1.0)
         raise ValueError("No person found in the frame")
 
     monkeypatch.setattr(session_module, "analyse", fake_analyse)

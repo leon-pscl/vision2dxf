@@ -10,11 +10,13 @@ import numpy as np
 import pytest
 
 from bodymeasure.config import Calibration, load_app_config
-from bodymeasure.preprocess import prepare, rotate
+from bodymeasure.preprocess import pad, prepare, rotate
 
 ROTATION = load_app_config().camera.rotation
+PAD_FRAC = load_app_config().camera.pad_frac
 LANDSCAPE = np.zeros((720, 1280, 3), dtype=np.uint8)
 PORTRAIT = np.zeros((1280, 720, 3), dtype=np.uint8)
+PADDED = pad(PORTRAIT, PAD_FRAC).shape
 
 
 def _marker(shape: tuple[int, ...]) -> np.ndarray:
@@ -25,14 +27,14 @@ def _marker(shape: tuple[int, ...]) -> np.ndarray:
 
 
 def test_a_live_frame_is_turned_the_configured_way() -> None:
-    assert prepare(_marker(LANDSCAPE.shape), Calibration(rotation=90)).shape == PORTRAIT.shape
-    assert prepare(_marker(LANDSCAPE.shape), None).shape == PORTRAIT.shape
+    assert prepare(_marker(LANDSCAPE.shape), Calibration(rotation=90)).shape == PADDED
+    assert prepare(_marker(LANDSCAPE.shape), None).shape == PADDED
 
 
 def test_an_upright_frame_is_left_alone() -> None:
     prepared = prepare(_marker(PORTRAIT.shape), Calibration(rotation=90), upright=True)
-    assert prepared.shape == PORTRAIT.shape
-    assert np.array_equal(prepared, _marker(PORTRAIT.shape))
+    assert prepared.shape == PADDED
+    assert np.array_equal(prepared, pad(_marker(PORTRAIT.shape), PAD_FRAC))
 
 
 def test_upright_still_undistorts_when_the_station_has_a_lens_model() -> None:
@@ -43,8 +45,18 @@ def test_upright_still_undistorts_when_the_station_has_a_lens_model() -> None:
         rotation=90,
     )
     prepared = prepare(_marker(PORTRAIT.shape), lens, upright=True)
-    assert prepared.shape == PORTRAIT.shape
-    assert not np.array_equal(prepared, _marker(PORTRAIT.shape)), "not undistorted"
+    assert prepared.shape == PADDED
+    assert not np.array_equal(prepared, pad(_marker(PORTRAIT.shape), PAD_FRAC)), "not undistorted"
+
+
+def test_a_body_touching_the_edge_gains_a_margin() -> None:
+    """The border is what lets a frame-filling body pass the framing gate."""
+    full = np.ones((1280, 720, 3), dtype=np.uint8) * 255
+    padded = pad(full, PAD_FRAC)
+    border = (padded.shape[0] - full.shape[0]) // 2
+    assert border > 0
+    assert padded[0, 0].tolist() == [114, 114, 114]
+    assert np.array_equal(padded[border:-border, border:-border], full)
 
 
 def test_rotation_still_refuses_an_angle_that_would_resample() -> None:

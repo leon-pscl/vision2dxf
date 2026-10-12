@@ -52,10 +52,26 @@ def undistort(image: np.ndarray, calibration: Calibration) -> np.ndarray:
     )
 
 
+def pad(image: np.ndarray, frac: float) -> np.ndarray:
+    """Add a border of ``frac`` of the long side around the frame.
+
+    A tight room leaves the subject filling the frame edge to edge, which both
+    the detector and the framing gate read as a cut-off body. A border is air
+    that costs no distance: millimetres per pixel come from the head-to-floor
+    span, which a border does not move.
+    """
+    border = int(round(frac * max(image.shape[:2])))
+    if border <= 0:
+        return image
+    return cv2.copyMakeBorder(
+        image, border, border, border, border, cv2.BORDER_CONSTANT, value=(114, 114, 114)
+    )
+
+
 def prepare(
     image: np.ndarray, calibration: Calibration | None, upright: bool = False
 ) -> np.ndarray:
-    """Rotate, then undistort if the station has a lens model.
+    """Rotate, undistort if the station has a lens model, then pad.
 
     ``upright`` says the frame is already in final orientation and must not be
     turned: the station's camera is mounted portrait, so its live frames arrive
@@ -69,5 +85,5 @@ def prepare(
     degrees = 0 if upright else (calibration.rotation if calibration else config.camera.rotation)
     rotated = rotate(image, degrees)
     if calibration and calibration.has_lens_model:
-        return undistort(rotated, calibration)
-    return rotated
+        rotated = undistort(rotated, calibration)
+    return pad(rotated, config.camera.pad_frac)

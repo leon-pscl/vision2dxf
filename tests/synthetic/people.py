@@ -13,6 +13,9 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from bodymeasure.config import load_app_config
+from bodymeasure.preprocess import pad
+
 FRAME_MARGIN = 0.09  # the pose gate wants 8% of the frame clear top and bottom
 _DRAWN_FLOOR = 1750  # rows below, in the drawing as originally laid out
 _DRAWN_HEAD_TOP = 105
@@ -332,3 +335,25 @@ def make_side(view: str = "side_left") -> SyntheticSide:
         rows=dict(SIDE_ROWS),
         depths=depths,
     )
+
+
+def as_captured(
+    photo_or_mask: np.ndarray, keypoints: np.ndarray | None = None
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+    """Return a drawn frame as ``prepare`` hands it to the models: bordered.
+
+    Every capture is padded now, so a stub standing in for ``analyse`` must be
+    fed, and must answer with, the padded frame the real one sees. A colour
+    frame gets the grey border ``prepare`` adds; a mask gets empty rows and
+    columns, because nothing of the body lives in the border.
+    """
+    frac = load_app_config().camera.pad_frac
+    border = int(round(frac * max(photo_or_mask.shape[:2])))
+    if photo_or_mask.ndim == 3:
+        return pad(photo_or_mask, frac)
+    padded = np.pad(photo_or_mask, border)
+    if keypoints is None:
+        return padded
+    shifted = keypoints.copy()
+    shifted[:, :2] += border
+    return padded, shifted
