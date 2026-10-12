@@ -23,3 +23,5 @@ ignore = ["D203", "D213"]
                                                         # only pass the same context around
 "tests/*" = ["D103", "PLR2004"]
 "src/bodymeasure/api.py" = ["PLR0913"]   # a route signature is the request schema
+"src/bodymeasure/artifacts.py" = ["PLR0913"]  # a manifest entry's fields travel together
+"src/bodymeasure/overlay.py" = ["PLR0913"]    # so do a drawing's inputs

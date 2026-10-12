@@ -33,6 +33,10 @@ SCHEMA_VERSION = 1
 STATUSES = ("capturing", "measured", "confirmed", "exported")
 EXPORTABLE = ("confirmed", "exported")
 IMAGE_SUFFIXES = (".jpg", "_mask.png", "_kp.json")
+# Folders that hold pictures of the person, or the model output taken from them.
+# Everything the operator may keep - landmarks, the YAML files, the manifest -
+# lives outside these, so a purge leaves a usable record behind (brief 18).
+IMAGE_DIRS = ("views", "predictions", "mesh")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
@@ -312,7 +316,8 @@ def _delete_images(folder: Path, keep_debug: bool) -> bool:
     removed = False
     for path in folder.glob("*"):
         if path.is_dir():
-            if path.name == "debug" and not keep_debug:
+            drop = path.name in IMAGE_DIRS or (path.name == "debug" and not keep_debug)
+            if drop:
                 shutil.rmtree(path)
                 removed = True
             continue
@@ -373,13 +378,15 @@ def export_csv(path: Path) -> Path:
         if not body_file.exists():
             continue
         body = yaml.safe_load(body_file.read_text(encoding="utf-8"))["body"]
+        body = {key: "" if value is None else value for key, value in body.items()}
         report_file = folder / "measurement_report.yaml"
-        report = (
-            yaml.safe_load(report_file.read_text(encoding="utf-8"))
+        records = (
+            yaml.safe_load(report_file.read_text(encoding="utf-8")).get("measurements", [])
             if report_file.exists()
-            else {"values": {}}
+            else []
         )
-        edited = {key: report["values"].get(key, {}).get("edited", False) for key in keys}
+        by_name = {record["name"]: record for record in records}
+        edited = {key: by_name.get(key, {}).get("edited", False) for key in keys}
         rows.append(
             [session["id"], session["subject_code"], session["sex"]]
             + [body.get(key, "") for key in keys]

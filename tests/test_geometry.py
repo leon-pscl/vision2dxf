@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from tests.synthetic.figures import SLICES, make_figure
 
+from bodymeasure import geometry
 from bodymeasure.geometry import (
     back_arc,
     contour_length,
@@ -109,3 +110,85 @@ def test_a_rows_and_heights_round_trip_on_a_views_scale() -> None:
     for name in SLICES:
         row = figure.row_of(name)
         assert scale.row_of(scale.height_mm(row)) == row
+
+
+def test_each_ellipse_equation_is_exact_for_a_circle() -> None:
+    """Brief 19.1: the circle case, for each formula."""
+    for radius in (1.0, 5.0, 123.456):
+        expected = 2 * math.pi * radius
+        assert geometry.ramanujan_i(radius, radius) == pytest.approx(expected)
+        assert geometry.ramanujan_ii(radius, radius) == pytest.approx(expected)
+        value, formula = geometry.ellipse_perimeter_montazerian(radius, radius)
+        assert value == pytest.approx(expected)
+        assert formula == geometry.ELLIPSE_EQUATION_1
+
+
+def _exact_perimeter(a: float, b: float, steps: int = 400_000) -> float:
+    """Return the ellipse perimeter by numerical integration, as the check value."""
+    theta = np.linspace(0.0, 2 * math.pi, steps)
+    dx = -a * np.sin(theta)
+    dy = b * np.cos(theta)
+    return float(np.trapezoid(np.hypot(dx, dy), theta))
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [(50.0, 40.0), (143.2, 110.9), (90.0, 30.0), (100.0, 20.0), (120.0, 8.0)],
+)
+def test_the_montazerian_rule_stays_close_to_the_true_perimeter(a: float, b: float) -> None:
+    """Brief 19.1: compare the chosen equation with numerical integration."""
+    value, formula = geometry.ellipse_perimeter_montazerian(a, b)
+    exact = _exact_perimeter(a, b)
+
+    assert value == pytest.approx(exact, rel=0.005), formula
+    assert formula == (
+        geometry.ELLIPSE_EQUATION_1 if a <= 3 * b else geometry.ELLIPSE_EQUATION_2
+    )
+
+
+def test_the_elongated_equation_is_chosen_where_the_first_one_drifts() -> None:
+    """The whole point of the two-equation rule: a flat section needs the second."""
+    a, b = 120.0, 8.0  # a > 3b
+    exact = _exact_perimeter(a, b)
+
+    assert abs(geometry.ramanujan_i(a, b) - exact) > abs(geometry.ramanujan_ii(a, b) - exact)
+    assert geometry.ellipse_perimeter_montazerian(a, b)[1] == geometry.ELLIPSE_EQUATION_2
+
+
+def test_the_rule_reads_the_axes_in_either_order() -> None:
+    assert geometry.ellipse_perimeter_montazerian(8.0, 120.0) == (
+        geometry.ellipse_perimeter_montazerian(120.0, 8.0)
+    )
+
+
+def test_a_girth_uses_the_breadth_and_the_depth_as_the_two_axes() -> None:
+    """Brief 12.1: semi-axes are max/2 and min/2 of the measured breadth and depth."""
+    width, depth = 286.4, 221.8
+    value, formula = geometry.montazerian_girth(width, depth)
+
+    assert (value, formula) == geometry.ellipse_perimeter_montazerian(width / 2, depth / 2)
+    assert value == pytest.approx(_exact_perimeter(width / 2, depth / 2), rel=0.005)
+    # A circular section: breadth and depth equal, so the girth is pi x diameter.
+    assert geometry.montazerian_girth(100.0, 100.0)[0] == pytest.approx(math.pi * 100.0)
+
+
+def test_a_negative_semi_axis_is_refused_not_absorbed() -> None:
+    for function in (geometry.ramanujan_i, geometry.ramanujan_ii):
+        with pytest.raises(ValueError, match="non-negative"):
+            function(-1.0, 1.0)
+
+
+def test_the_brief_12_helpers_measure_what_they_say() -> None:
+    points = np.array([[0.0, 0.0], [3.0, 0.0], [3.0, 4.0]])
+
+    assert geometry.euclidean_length(points, 2.0) == pytest.approx(10.0), "end to end, not along"
+    assert geometry.polyline_length(points) == pytest.approx(7.0), "along the path"
+    assert geometry.euclidean_length(points[:1], 2.0) == 0.0
+    assert geometry.convex_hull_path_length(points) <= geometry.polyline_length(points)
+
+
+def test_an_angle_is_degrees_at_the_vertex() -> None:
+    assert geometry.angle_deg((1.0, 0.0), (0.0, 0.0), (0.0, 1.0)) == pytest.approx(90.0)
+    assert geometry.angle_deg((1.0, 0.0), (0.0, 0.0), (1.0, 0.0)) == pytest.approx(0.0)
+    assert geometry.angle_deg((-1.0, 0.0), (0.0, 0.0), (1.0, 0.0)) == pytest.approx(180.0)
+    assert geometry.angle_deg((0.0, 0.0), (0.0, 0.0), (1.0, 0.0)) == 0.0, "undefined, not invented"

@@ -63,11 +63,37 @@ SIDE_KEYPOINTS = {
 
 
 @dataclass(frozen=True)
+class Reason:
+    """One reason a capture was refused: a code to branch on, a line to read.
+
+    The code is what the UI and any later analysis keys off; the message is what
+    the subject is told to do about it (brief 9.4).
+    """
+
+    code: str
+    message: str
+
+
+@dataclass(frozen=True)
 class GateResult:
     """Whether a capture may be used, and why not."""
 
     ok: bool
-    reasons: list[str] = field(default_factory=list)
+    reasons: list[Reason] = field(default_factory=list)
+
+    @property
+    def messages(self) -> list[str]:
+        """Return the retake instructions alone, in order."""
+        return [reason.message for reason in self.reasons]
+
+    def as_dict(self) -> dict[str, object]:
+        """Return the gate result in the shape the API and the UI expect."""
+        return {
+            "ok": self.ok,
+            "reasons": [
+                {"code": reason.code, "message": reason.message} for reason in self.reasons
+            ],
+        }
 
 
 def _angle_from_torso(shoulder: np.ndarray, elbow: np.ndarray, torso: np.ndarray) -> float:
@@ -82,14 +108,19 @@ def _angle_from_torso(shoulder: np.ndarray, elbow: np.ndarray, torso: np.ndarray
 
 def _confidence_reasons(
     keypoints: np.ndarray, indices: tuple[int, ...], min_conf: float
-) -> list[str]:
+) -> list[Reason]:
     missing = [KEYPOINT_NAMES[index] for index in indices if keypoints[index, 2] < min_conf]
     if not missing:
         return []
-    return [f"Cannot see the {', '.join(missing)} clearly: check lighting and framing"]
+    return [
+        Reason(
+            "KEYPOINT_CONFIDENCE",
+            f"Cannot see the {', '.join(missing)} clearly: check lighting and framing",
+        )
+    ]
 
 
-def _framing_reasons(mask: np.ndarray, thresholds: Mapping[str, float]) -> list[str]:
+def _framing_reasons(mask: np.ndarray, thresholds: Mapping[str, float]) -> list[Reason]:
     """Check the body fills the frame and stands in the middle of it.
 
     There is no floor mark to stand on any more: the scale comes from the
@@ -100,22 +131,41 @@ def _framing_reasons(mask: np.ndarray, thresholds: Mapping[str, float]) -> list[
     rows = np.flatnonzero(np.asarray(mask).any(axis=1))
     columns = np.flatnonzero(np.asarray(mask).any(axis=0))
     if rows.size == 0:
-        return ["No person found in the frame"]
+        return [Reason("NO_PERSON", "No person found in the frame")]
 
     height, width = mask.shape
     margin_px = thresholds["frame_margin_frac"] * height
     reasons = []
     if rows.min() < margin_px:
-        reasons.append("Head is too close to the top of the frame: step back or tilt the camera")
+        reasons.append(
+            Reason(
+                "HEAD_CLIPPED",
+                "Head is too close to the top of the frame: step back or tilt the camera",
+            )
+        )
     if height - 1 - rows.max() < margin_px:
-        reasons.append("Feet are too close to the bottom of the frame: step back")
+        reasons.append(
+            Reason("FEET_CLIPPED", "Feet are too close to the bottom of the frame: step back")
+        )
     if rows.max() - rows.min() + 1 < thresholds["body_height_frac"] * height:
-        reasons.append("Body too small in the frame: step closer, or crop an uploaded photo")
+        reasons.append(
+            Reason(
+                "BODY_TOO_SMALL",
+                "Body too small in the frame: step closer, or crop an uploaded photo",
+            )
+        )
     offset = abs((columns.min() + columns.max()) / 2 - width / 2)
     if offset > thresholds["body_centre_band_frac"] * width / 2:
-        reasons.append("Move towards the middle of the frame: stand square to the camera")
+        reasons.append(
+            Reason(
+                "OFF_CENTRE",
+                "Move towards the middle of the frame: stand square to the camera",
+            )
+        )
     if columns.min() == 0 or columns.max() == width - 1:
-        reasons.append("Body is cut off at the side of the frame: step back")
+        reasons.append(
+            Reason("BODY_CUT_OFF", "Body is cut off at the side of the frame: step back")
+        )
     return reasons
 
 
@@ -144,17 +194,30 @@ def gate_front(
         )
         if angle < low:
             reasons.append(
-                f"{side} arm too close to body ({angle:.0f} degrees, need {low:.0f}-{high:.0f})"
+                Reason(
+                    "ARM_TOO_CLOSE",
+                    f"{side} arm too close to body "
+                    f"({angle:.0f} degrees, need {low:.0f}-{high:.0f})",
+                )
             )
         elif angle > high:
             reasons.append(
-                f"{side} arm too far from body ({angle:.0f} degrees, need {low:.0f}-{high:.0f})"
+                Reason(
+                    "ARM_TOO_FAR",
+                    f"{side} arm too far from body "
+                    f"({angle:.0f} degrees, need {low:.0f}-{high:.0f})",
+                )
             )
 
         wrist = keypoints[wrist_index, :2]
         run = run_containing(mask, int(round(wrist[1])), torso_x)
         if run is not None and run[0] <= wrist[0] <= run[1]:
-            reasons.append(f"{side} wrist overlaps the torso: move the hand away from the body")
+            reasons.append(
+                Reason(
+                    "WRIST_OVERLAP",
+                    f"{side} wrist overlaps the torso: move the hand away from the body",
+                )
+            )
 
     return GateResult(ok=not reasons, reasons=reasons)
 
@@ -183,7 +246,12 @@ def gate_side(
     span = abs(float(keypoints[L_SHOULDER, 0] - keypoints[R_SHOULDER, 0]))
     limit = thresholds["side_shoulder_ratio_max"] * front_shoulder_px
     if front_shoulder_px > 0 and span > limit:
-        reasons.append("Not side-on yet: turn further so one shoulder hides the other")
+        reasons.append(
+            Reason(
+                "NOT_SIDE_ON",
+                "Not side-on yet: turn further so one shoulder hides the other",
+            )
+        )
 
     return GateResult(ok=not reasons, reasons=reasons)
 

@@ -8,6 +8,7 @@ station.
 
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import dataclass
 from functools import lru_cache
@@ -37,12 +38,21 @@ MERGE_AREA_FRACTION = 0.3
 
 @dataclass(frozen=True)
 class ViewAnalysis:
-    """One view's cleaned mask, keypoints and the CPU time each model took."""
+    """One view's masks, detection, keypoints and the CPU time each model took.
+
+    ``raw_mask`` is the model's own output and ``mask`` the cleaned one; both are
+    kept because the operator has to be able to see what cleanup changed
+    (brief 8, stages 06 and 07).
+    """
 
     mask: np.ndarray
     keypoints: np.ndarray
     seg_ms: float
     pose_ms: float
+    raw_mask: np.ndarray | None = None
+    box: tuple[int, int, int, int] = (0, 0, 0, 0)
+    confidence: float = 0.0
+    instances: int = 0
 
     @property
     def total_ms(self) -> float:
@@ -61,12 +71,49 @@ def weights_available() -> bool:
     return all(path.exists() for path in model_paths())
 
 
+def file_sha256(path: Path) -> str:
+    """Return the SHA-256 of a file, read in blocks so a big weight file fits."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def verify_weights() -> dict[str, str]:
+    """Return each weight file's hash, raising if a configured one does not match.
+
+    Raises:
+        FileNotFoundError: if a weight file is missing. Nothing is ever
+            downloaded: a station is provisioned before it is used (brief 5).
+        ValueError: if a configured hash does not match the file on disk.
+
+    """
+    models = load_app_config().models
+    digests = {}
+    for name, path, expected in (
+        ("seg", ROOT / models.seg, models.seg_sha256),
+        ("pose", ROOT / models.pose, models.pose_sha256),
+    ):
+        if not path.exists():
+            raise FileNotFoundError(f"model weights missing: {path}")
+        digests[name] = file_sha256(path)
+        if expected and digests[name] != expected:
+            raise ValueError(
+                f"{path.name} is not the configured weight file: "
+                f"expected {expected}, found {digests[name]}. "
+                f"Provision the station with tools/provision_models.py."
+            )
+    return digests
+
+
 @lru_cache(maxsize=1)
 def load_models() -> tuple[YOLO, YOLO]:
     """Load both YOLO26 models once and cache them.
 
     Raises:
         FileNotFoundError: if either weight file is missing.
+        ValueError: if a configured hash does not match the file on disk.
 
     """
     from ultralytics import YOLO
@@ -75,16 +122,26 @@ def load_models() -> tuple[YOLO, YOLO]:
     for path in (seg_path, pose_path):
         if not path.exists():
             raise FileNotFoundError(
-                f"model weights missing: {path}. Fetch them with "
-                f"\"python -c 'from ultralytics import YOLO; YOLO(\\\"{path.name}\\\")'\" "
-                f"and move the file into {path.parent}"
+                f"model weights missing: {path}. Provision the station with "
+                f"\"python tools/provision_models.py\" and move the file into {path.parent}"
             )
+    verify_weights()
     return YOLO(str(seg_path)), YOLO(str(pose_path))
+
+
+@dataclass(frozen=True)
+class Detection:
+    """The chosen person: the union mask, its box, its confidence, its rivals."""
+
+    mask: np.ndarray
+    box: tuple[int, int, int, int]
+    confidence: float
+    instances: int
 
 
 def _largest_person_mask(
     result: Results, shape: tuple[int, int], min_conf: float
-) -> np.ndarray:
+) -> Detection:
     """Return the subject's mask, rejoining a body the model split in two.
 
     Every person instance within ``MERGE_AREA_FRACTION`` of the biggest one is
@@ -112,15 +169,27 @@ def _largest_person_mask(
         raise ValueError("No person found in the frame")
 
     floor = max(float(data[index].sum()) for index in candidates) * MERGE_AREA_FRACTION
+    kept = [index for index in candidates if float(data[index].sum()) >= floor]
     mask = np.zeros(shape, dtype=bool)
-    for index in candidates:
-        if float(data[index].sum()) < floor:
-            continue
+    for index in kept:
         part = data[index]
         if part.shape != shape:
             part = cv2.resize(part, (shape[1], shape[0]), interpolation=cv2.INTER_NEAREST)
         mask |= part > _MASK_BINARY_THRESHOLD
-    return mask
+
+    rows = np.flatnonzero(mask.any(axis=1))
+    columns = np.flatnonzero(mask.any(axis=0))
+    box = (
+        (int(columns.min()), int(rows.min()), int(columns.max()), int(rows.max()))
+        if rows.size
+        else (0, 0, 0, 0)
+    )
+    return Detection(
+        mask=mask,
+        box=box,
+        confidence=max(float(confidences[index]) for index in kept),
+        instances=len(candidates),
+    )
 
 
 def _best_keypoints(result: Results) -> np.ndarray:
@@ -166,14 +235,18 @@ def analyse(image: np.ndarray) -> ViewAnalysis:
     )[0]
     pose_ms = (time.perf_counter() - started) * 1000
 
-    raw = _largest_person_mask(seg_result, shape, MERGE_CONF)
+    detection = _largest_person_mask(seg_result, shape, MERGE_CONF)
     return ViewAnalysis(
         mask=clean_mask(
-            raw,
+            detection.mask,
             int(config.thresholds["morph_kernel_px"]),
             int(config.thresholds["hole_fill_max_area_px"]),
         ),
         keypoints=_best_keypoints(pose_result),
         seg_ms=seg_ms,
         pose_ms=pose_ms,
+        raw_mask=detection.mask,
+        box=detection.box,
+        confidence=detection.confidence,
+        instances=detection.instances,
     )

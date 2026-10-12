@@ -37,15 +37,15 @@ def test_arms_outside_the_a_pose_are_named(
     person = make_person(arm_angle_deg=angle)
     result = gate_front(person.mask, person.keypoints, thresholds)
     assert not result.ok
-    assert sum(fragment in reason for reason in result.reasons) == 2  # both arms
-    assert any(reason.startswith("Left arm") for reason in result.reasons)
+    assert sum(fragment in reason for reason in result.messages) == 2  # both arms
+    assert any(reason.startswith("Left arm") for reason in result.messages)
 
 
 def test_a_wrist_over_the_torso_is_rejected(thresholds: dict[str, float]) -> None:
     person = make_person(wrist_over_torso=True)
     result = gate_front(person.mask, person.keypoints, thresholds)
     assert not result.ok
-    assert any("wrist overlaps the torso" in reason for reason in result.reasons)
+    assert any("wrist overlaps the torso" in reason for reason in result.messages)
 
 
 def test_a_hidden_keypoint_is_named(thresholds: dict[str, float]) -> None:
@@ -54,7 +54,7 @@ def test_a_hidden_keypoint_is_named(thresholds: dict[str, float]) -> None:
     keypoints[9, 2] = 0.2  # left wrist
     result = gate_front(person.mask, keypoints, thresholds)
     assert not result.ok
-    assert any("left wrist" in reason for reason in result.reasons)
+    assert any("left wrist" in reason for reason in result.messages)
 
 
 def test_a_hidden_leg_keypoint_still_passes(thresholds: dict[str, float]) -> None:
@@ -77,7 +77,7 @@ def test_a_body_too_close_to_the_top_is_rejected(thresholds: dict[str, float]) -
     keypoints[:, 1] -= shift
     result = gate_front(cropped, keypoints, thresholds)
     assert not result.ok
-    assert any("top of the frame" in reason for reason in result.reasons)
+    assert any("top of the frame" in reason for reason in result.messages)
 
 
 def test_a_body_too_short_in_the_frame_is_rejected(thresholds: dict[str, float]) -> None:
@@ -92,7 +92,7 @@ def test_a_body_too_short_in_the_frame_is_rejected(thresholds: dict[str, float])
     squashed[:kept] = person.mask[:kept]
     result = gate_front(squashed, person.keypoints, thresholds)
     assert not result.ok
-    assert any("too small in the frame" in reason for reason in result.reasons)
+    assert any("too small in the frame" in reason for reason in result.messages)
 
 
 def test_a_body_off_to_one_side_is_rejected(thresholds: dict[str, float]) -> None:
@@ -106,14 +106,15 @@ def test_a_body_off_to_one_side_is_rejected(thresholds: dict[str, float]) -> Non
     keypoints[:, 0] += shifted
     result = gate_front(moved, keypoints, thresholds)
     assert not result.ok
-    assert any("middle of the frame" in reason for reason in result.reasons)
+    assert any("middle of the frame" in reason for reason in result.messages)
 
 
 def test_an_empty_mask_says_so(thresholds: dict[str, float]) -> None:
     person = make_person()
     result = gate_front(np.zeros_like(person.mask), person.keypoints, thresholds)
     assert not result.ok
-    assert "No person found in the frame" in result.reasons
+    assert "No person found in the frame" in result.messages
+    assert [r.code for r in result.reasons] == ["NO_PERSON"]
 
 
 def test_a_good_side_capture_passes(thresholds: dict[str, float]) -> None:
@@ -134,7 +135,7 @@ def test_a_half_turned_subject_is_rejected(thresholds: dict[str, float]) -> None
         person.mask, keypoints, thresholds, person.shoulder_span_px
     )
     assert not result.ok
-    assert any("side-on" in reason for reason in result.reasons)
+    assert any("side-on" in reason for reason in result.messages)
 
 
 def test_the_side_gate_only_needs_the_visible_side(thresholds: dict[str, float]) -> None:
@@ -152,7 +153,7 @@ def test_the_side_gate_names_a_missing_visible_keypoint(thresholds: dict[str, fl
     keypoints[13, 2] = 0.1  # left knee, on the visible side
     result = gate_side(person.mask, keypoints, thresholds, 190.0)
     assert not result.ok
-    assert any("left knee" in reason for reason in result.reasons)
+    assert any("left knee" in reason for reason in result.messages)
 
 
 def test_facing_direction_comes_from_nose_against_ear() -> None:
@@ -172,3 +173,18 @@ def test_shoulder_span_zero_skips_the_side_on_check(thresholds: dict[str, float]
     keypoints[R_SHOULDER, 0] += 200
     result = gate_side(person.mask, keypoints, thresholds, 0.0)
     assert result.ok, result.reasons
+
+
+def test_every_refusal_carries_a_code_and_an_instruction(
+    thresholds: dict[str, float],
+) -> None:
+    """Brief 9.4: the UI branches on the code, the subject reads the message."""
+    person = make_person(wrist_over_torso=True)
+    result = gate_front(person.mask, person.keypoints, thresholds)
+
+    assert not result.ok
+    assert all(reason.code.isupper() and reason.message for reason in result.reasons)
+    assert "WRIST_OVERLAP" in {reason.code for reason in result.reasons}
+    payload = result.as_dict()
+    assert payload["ok"] is False
+    assert {"code", "message"} == set(payload["reasons"][0])

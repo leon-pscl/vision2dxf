@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sessions — body measurement</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="bar">
+    <nav aria-label="Pages">
+      <a href="/">Capture</a>
+      <a href="/sessions.html" aria-current="page">Sessions</a>
+    </nav>
+    <p class="row">
+      <output id="sessions-status" class="meta state wait">loading…</output>
+      <button id="theme" type="button" aria-pressed="false">Dark theme</button>
+    </p>
+  </header>
+
+  <main id="sessions">
+    <h1>Sessions</h1>
+    <p class="row">
+      <label class="field">Status
+        <select id="status-filter">
+          <option value="">all</option>
+          <option value="capturing">capturing</option>
+          <option value="measured">measured</option>
+          <option value="confirmed">confirmed</option>
+          <option value="exported">exported</option>
+        </select>
+      </label>
+      <a href="/api/export.csv" download>Download the confirmed-session CSV</a>
+    </p>
+    <p class="hint">
+      A session is a subject code, never a name. Deleting one removes every
+      photograph in it and cannot be undone.
+    </p>
+    <ul id="session-list" class="sessions"></ul>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

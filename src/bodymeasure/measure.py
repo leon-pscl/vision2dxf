@@ -22,6 +22,7 @@ from bodymeasure.geometry import (
     back_arc,
     contour_length,
     hull_length,
+    montazerian_girth,
     run_containing,
     runs_in_row,
     two_semi_ellipse_girth,
@@ -42,28 +43,108 @@ BUST_POINTS_RATIO = 0.170  # GarmentCode mean_all.yaml: 16.95 / 99.84
 BUM_POINTS_RATIO = 0.176  # GarmentCode mean_all.yaml: 18.23 / 103.48
 
 
+# Allowed ``status`` values of a provenance record (brief 14).
+ACQUIRED = "acquired"
+OPERATOR_CONFIRMED = "operator_confirmed"
+MANUAL_INPUT = "manual_input"
+ESTIMATED_PENDING = "estimated_pending_acceptance"
+UNAVAILABLE = "unavailable"
+INVALIDATED = "invalidated"
+BLOCKING_STATUSES = (UNAVAILABLE, INVALIDATED, ESTIMATED_PENDING)
+
+# Allowed ``source`` values (brief 14).
+GEOMETRIC_2D = "geometric_2d"
+MESH_VISUAL_HULL = "mesh_visual_hull"
+OPERATOR_INPUT = "operator_input"
+DERIVED_PATTERN_PARAMETER = "derived_pattern_parameter"
+
+
 @dataclass(frozen=True)
 class Measurement:
-    """One value with the provenance that goes into ``measurement_report.yaml``."""
+    """One value and the whole provenance record behind it (brief 14).
 
-    value_cm: float
-    source: str
-    confidence: str
+    ``value`` is the internal value: millimetres when ``unit`` is ``"mm"``,
+    degrees when it is ``"deg"``, and ``None`` when the measurement could not be
+    taken. A failed measurement is never zero and never a population average: it
+    is ``None`` with the reason in ``warnings``.
+    """
+
+    value: float | None
+    source: str = GEOMETRIC_2D
+    confidence: str = "medium"
     views: list[str] = field(default_factory=list)
     edited: bool = False
     note: str = ""
+    unit: str = "mm"
+    status: str = ACQUIRED
+    method: str = ""
+    formula: str = ""
+    inputs: dict[str, float] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    auto: bool = True
+
+    @property
+    def value_cm(self) -> float | None:
+        """Return the display value: centimetres to one decimal, or degrees."""
+        if self.value is None:
+            return None
+        return round(self.value / 10.0, 1) if self.unit == "mm" else round(self.value, 1)
+
+    @property
+    def available(self) -> bool:
+        """Return whether this value may be exported as a body measurement."""
+        return self.value is not None and self.status not in BLOCKING_STATUSES
+
+    def record(self, name: str) -> dict[str, object]:
+        """Return the provenance record for ``measurement_report.yaml`` (brief 14)."""
+        value_key = "value_mm" if self.unit == "mm" else "value_deg"
+        return {
+            "name": name,
+            value_key: None if self.value is None else round(self.value, 2),
+            "value_cm_display" if self.unit == "mm" else "value_deg_display": self.value_cm,
+            "status": self.status,
+            "source": self.source,
+            "method": self.method,
+            "views": list(self.views),
+            "inputs": {key: round(value, 2) for key, value in self.inputs.items()},
+            "formula": self.formula,
+            "confidence": self.confidence,
+            "validated_against_manual": False,
+            "auto": self.auto,
+            "edited": self.edited,
+            "warnings": list(self.warnings),
+            **({"note": self.note} if self.note else {}),
+        }
 
 
 @dataclass(frozen=True)
 class MeasurementSet:
-    """Every measurement, plus the warnings the tailor should read."""
+    """Every measurement, plus the warnings the operator should read."""
 
     values: dict[str, Measurement]
     warnings: list[str] = field(default_factory=list)
 
-    def body(self) -> dict[str, float]:
-        """Return the flat ``body:`` mapping for ``body_measurements.yaml``."""
-        return {name: entry.value_cm for name, entry in sorted(self.values.items())}
+    def body(self) -> dict[str, float | None]:
+        """Return the flat ``body:`` mapping for ``body_measurements.yaml``.
+
+        A measurement that was not acquired is exported as ``null`` rather than
+        omitted, so a pattern engine sees the gap instead of a plausible number.
+        """
+        return {
+            name: entry.value_cm if entry.available else None
+            for name, entry in sorted(self.values.items())
+        }
+
+    def missing(self, required: list[str]) -> dict[str, str]:
+        """Return the required fields that block export, each with its reason."""
+        blocked = {}
+        for name in required:
+            entry = self.values.get(name)
+            if entry is None:
+                blocked[name] = "not computed by this pipeline"
+            elif not entry.available:
+                blocked[name] = "; ".join(entry.warnings) or entry.status
+        return blocked
 
 
 @dataclass
@@ -103,11 +184,6 @@ class SideView:
         return float(run[1] if side == "front" else run[0])
 
 
-def _cm(mm: float) -> float:
-    """Round millimetres to centimetres, one decimal, as the contract requires."""
-    return round(mm / 10.0, 1)
-
-
 def _distance_mm(a: Landmark, b: Landmark, scale: ViewScale) -> float:
     return math.hypot((a.x - b.x) * scale.mm_per_px, (a.y - b.y) * scale.mm_per_px)
 
@@ -122,13 +198,49 @@ def _mean_depths(sides: list[SideView], h_mm: float) -> tuple[float, float, list
     return float(np.mean(fronts)), float(np.mean(backs)), fronts
 
 
+@dataclass(frozen=True)
+class Girth:
+    """One circumference and every intermediate value behind it (brief 3.1)."""
+
+    value_mm: float | None
+    formula: str
+    inputs: dict[str, float]
+    back_arc_mm: float | None
+    warnings: list[str] = field(default_factory=list)
+
+
 def _girth_at(
     h_mm: float, front_mask: np.ndarray, torso_x: int, sides: list[SideView], front: ViewScale
-) -> tuple[float, float]:
-    """Return the two-semi-ellipse girth and the back arc in mm at a height."""
-    width = width_at(front_mask, front.row_of(h_mm), torso_x, front.mm_per_px)
+) -> Girth:
+    """Return the Montazerian circumference at a height, with its inputs.
+
+    The breadth comes from the front silhouette and the depth from the side
+    silhouette *at the same height above the floor*, never at the same pixel row
+    (brief 10). The back arc is a separate, asymmetric model (brief 12.2) and is
+    marked as such where it is stored.
+    """
+    front_row = front.row_of(h_mm)
+    width = width_at(front_mask, front_row, torso_x, front.mm_per_px)
     depth_front, depth_back, _ = _mean_depths(sides, h_mm)
-    return two_semi_ellipse_girth(width, depth_front, depth_back), back_arc(width, depth_back)
+    depth = depth_front + depth_back
+    if width <= 0 or depth <= 0:
+        reason = "front breadth" if width <= 0 else "side depth"
+        return Girth(None, "", {}, None, [f"no {reason} at this height: check the mask and rows"])
+
+    girth, formula = montazerian_girth(width, depth)
+    inputs = {
+        "front_breadth_mm": width,
+        "side_depth_mm": depth,
+        "side_depth_front_mm": depth_front,
+        "side_depth_back_mm": depth_back,
+        "row_height_mm": h_mm,
+        "front_row": float(front_row),
+        "front_mm_per_px": front.mm_per_px,
+    }
+    for side in sides:
+        inputs[f"{side.name}_row"] = float(side.scale.row_of(h_mm))
+        inputs[f"{side.name}_mm_per_px"] = side.scale.mm_per_px
+    return Girth(girth, formula, inputs, back_arc(width, depth_back))
 
 
 def _girth_spread_mm(
@@ -141,7 +253,7 @@ def _girth_spread_mm(
     girths = []
     for side in sides:
         depth_front, depth_back = side.depths(side.scale.row_of(h_mm))
-        girths.append(two_semi_ellipse_girth(width, depth_front, depth_back))
+        girths.append(montazerian_girth(width, depth_front + depth_back)[0])
     return max(girths) - min(girths)
 
 
@@ -229,19 +341,41 @@ def measure(
 
     def add(
         name: str,
-        value: float,
+        value: float | None,
         confidence: str,
         views: list[str],
-        source: str = "geometric",
+        method: str,
+        source: str = GEOMETRIC_2D,
         unit: str = "mm",
+        inputs: dict[str, float] | None = None,
+        formula: str = "",
+        reasons: list[str] | None = None,
     ) -> None:
-        """Store one value, converting mm to cm but leaving degrees alone."""
+        """Store one provenance record, keeping the internal value unrounded."""
+        reasons = reasons or []
         values[name] = Measurement(
-            _cm(value) if unit == "mm" else round(value, 1), source, confidence, views
+            value=value,
+            source=source,
+            confidence=confidence,
+            views=views,
+            unit=unit,
+            status=UNAVAILABLE if value is None else ACQUIRED,
+            method=method,
+            formula=formula,
+            inputs=inputs or {},
+            warnings=reasons,
         )
 
     # --- heights and lengths -------------------------------------------------
-    values["height"] = Measurement(round(height_cm, 1), "tailor_input", "high", ["front"])
+    values["height"] = Measurement(
+        value=height_cm * 10.0,
+        source=OPERATOR_INPUT,
+        confidence="high",
+        views=["front"],
+        status=MANUAL_INPUT,
+        method="operator_measured_stature",
+        auto=False,
+    )
     add(
         "head_l",
         _distance_mm(
@@ -249,18 +383,21 @@ def measure(
         ),
         "medium",
         [first.name],
+        method="landmark_distance_nape_to_head_top",
     )
     add(
         "neck_w",
         _distance_mm(front["neck_base_left"], front["neck_base_right"], front_scale),
         "medium",
         ["front"],
+        method="landmark_distance_neck_base_left_right",
     )
     add(
         "shoulder_w",
         _distance_mm(front["shoulder_left"], front["shoulder_right"], front_scale),
         "medium",
         ["front"],
+        method="landmark_distance_shoulder_left_right",
     )
     add(
         "shoulder_incl",
@@ -278,6 +415,7 @@ def measure(
         ),
         "medium",
         ["front"],
+        method="mean_angle_neck_base_to_shoulder_above_horizontal",
         unit="deg",
     )
     add(
@@ -293,6 +431,7 @@ def measure(
         - h["armpit"],
         "medium",
         ["front"],
+        method="height_difference_shoulder_to_armpit_row",
     )
 
     arm_lengths, pose_angles = [], []
@@ -320,25 +459,84 @@ def measure(
         )
         pose_angles.append(_angle_above_horizontal(keypoint_shoulder, elbow, front_scale))
 
-    add("arm_length", float(np.mean(arm_lengths)), "medium", ["front"])
-    add("arm_pose_angle", float(np.mean(pose_angles)), "high", ["front"], unit="deg")
+    add(
+        "arm_length",
+        float(np.mean(arm_lengths)),
+        "medium",
+        ["front"],
+        method="polyline_shoulder_elbow_wrist_mean_of_sides",
+        inputs={"left_mm": arm_lengths[0], "right_mm": arm_lengths[1]},
+    )
+    add(
+        "arm_pose_angle",
+        float(np.mean(pose_angles)),
+        "high",
+        ["front"],
+        method="mean_upper_arm_angle_above_horizontal",
+        unit="deg",
+    )
+    # Left and right are kept separately as well as averaged, because a real
+    # body is asymmetric and the operator is the one who decides to accept the
+    # mean (brief 3.1).
+    for side_name, index in (("left", 0), ("right", 1)):
+        add(
+            f"shoulder_length_{side_name}",
+            _distance_mm(
+                front[f"neck_base_{side_name}"], front[f"shoulder_{side_name}"], front_scale
+            ),
+            "medium",
+            ["front"],
+            method="landmark_distance_neck_base_to_shoulder_point",
+        )
+        add(
+            f"arm_length_{side_name}",
+            arm_lengths[index],
+            "medium",
+            ["front"],
+            method="polyline_shoulder_elbow_wrist",
+        )
+    add(
+        "shoulder_length",
+        float(
+            np.mean([values["shoulder_length_left"].value, values["shoulder_length_right"].value])
+        ),
+        "medium",
+        ["front"],
+        method="mean_of_left_and_right_shoulder_length",
+    )
 
     # --- girths --------------------------------------------------------------
+    arc_keys = {"bust": "back_width", "waist": "waist_back_width", "hips": "hip_back_width"}
     for name, height, confidence in (
+        ("chest", h["armpit"], "medium"),
         ("bust", h["bust"], "medium"),
         ("underbust", h["underbust"], "low"),
         ("waist", h["waist"], "medium"),
         ("hips", h["hips"], "medium"),
     ):
-        girth, arc = _girth_at(height, front_mask, torso_x, sides, front_scale)
-        add(name, girth, confidence, both)
-        if name in ("bust", "waist", "hips"):
-            key = {
-                "bust": "back_width",
-                "waist": "waist_back_width",
-                "hips": "hip_back_width",
-            }[name]
-            add(key, arc, "low", both)
+        girth = _girth_at(height, front_mask, torso_x, sides, front_scale)
+        add(
+            name,
+            girth.value_mm,
+            confidence,
+            both,
+            method="montazerian_ellipse",
+            inputs=girth.inputs,
+            formula=girth.formula,
+            reasons=girth.warnings,
+        )
+        if name in arc_keys:
+            add(
+                arc_keys[name],
+                girth.back_arc_mm,
+                "low",
+                both,
+                method="semi_ellipse_back_arc_from_balance_line",
+                inputs=girth.inputs,
+                formula="semi_ellipse_ramanujan_ii",
+                reasons=girth.warnings
+                or ["method-specific approximation, not validated against a tape"],
+            )
         spread = _girth_spread_mm(height, front_mask, torso_x, sides, front_scale)
         if spread > GIRTH_DISAGREEMENT_MM:
             warnings.append(
@@ -354,11 +552,27 @@ def measure(
         for row in thigh_rows
         if row < front_mask.shape[0]
     ]
-    add("leg_circ", max(leg_girths, default=0.0), "medium", both)
+    add(
+        "leg_circ",
+        max(leg_girths) if leg_girths else None,
+        "medium",
+        both,
+        method="montazerian_ellipse_thigh_section",
+        reasons=[] if leg_girths else ["no thigh section below the crotch row"],
+    )
 
     wrist_width = _distance_mm(front["wrist_left_a"], front["wrist_left_b"], front_scale)
     wrist_width_right = _distance_mm(front["wrist_right_a"], front["wrist_right_b"], front_scale)
-    add("wrist", math.pi * (wrist_width + wrist_width_right) / 2, "low", ["front"])
+    add(
+        "wrist",
+        math.pi * (wrist_width + wrist_width_right) / 2,
+        "low",
+        ["front"],
+        method="circular_section_from_front_width",
+        inputs={"left_width_mm": wrist_width, "right_width_mm": wrist_width_right},
+        formula="circle_from_diameter",
+        reasons=["modelled as a circle: a side view cannot see the wrist clear of the body"],
+    )
 
     # --- contour lengths and vertical differences ----------------------------
     nape = first.landmarks["nape"]
@@ -370,27 +584,46 @@ def measure(
         contour_length(_edge_path(first, nape.y, waist_in_side, "back"), mm, mm),
         "medium",
         [first.name],
+        method="side_back_contour_nape_to_waist",
+        formula="polyline_length",
     )
     add(
         "waist_over_bust_line",
         hull_length(_edge_path(first, hps.y, waist_in_side, "front"), mm, mm),
         "low",
         [first.name],
+        method="side_front_tape_path_hps_to_waist",
+        formula="convex_hull_path_length",
     )
     add(
         "bust_line",
         hull_length(_edge_path(first, hps.y, first.landmarks["bust_row"].y, "front"), mm, mm),
         "low",
         [first.name],
+        method="side_front_tape_path_hps_to_bust",
+        formula="convex_hull_path_length",
     )
     add(
         "vert_bust_line",
         first.scale.height_mm(nape.y) - h["bust"],
         "medium",
         [first.name],
+        method="height_difference_nape_to_bust_row",
     )
-    add("hips_line", h["waist"] - h["hips"], "medium", both)
-    add("crotch_hip_diff", h["hips"] - h["crotch"], "medium", both)
+    add(
+        "hips_line",
+        h["waist"] - h["hips"],
+        "medium",
+        both,
+        method="height_difference_waist_row_to_hip_row",
+    )
+    add(
+        "crotch_hip_diff",
+        h["hips"] - h["crotch"],
+        "medium",
+        both,
+        method="height_difference_hip_row_to_crotch_row",
+    )
 
     waist_row = front_scale.row_of(h["waist"])
     hip_row = front_scale.row_of(h["hips"])
@@ -406,19 +639,36 @@ def measure(
         inclinations.append(_angle_from_vertical(waist_edge, hip_edge, front_scale))
     add(
         "hip_inclination",
-        float(np.mean(inclinations or [0.0])),
+        float(np.mean(inclinations)) if inclinations else None,
         "medium",
         ["front"],
+        method="mean_waist_to_hip_edge_angle_from_vertical",
         unit="deg",
+        reasons=[] if inclinations else ["waist or hip row misses the torso: check the rows"],
     )
 
     # --- not visible in a silhouette ----------------------------------------
-    values["bust_points"] = Measurement(
-        round(values["bust"].value_cm * BUST_POINTS_RATIO, 1), "default_ratio", "estimated", []
-    )
-    values["bum_points"] = Measurement(
-        round(values["hips"].value_cm * BUM_POINTS_RATIO, 1), "default_ratio", "estimated", []
-    )
+    # A population ratio is not a measurement. These two are offered as a
+    # starting point the operator must accept or replace, and they stay
+    # ``estimated_pending_acceptance`` until someone does (brief 2, 14).
+    for name, from_key, ratio in (
+        ("bust_points", "bust", BUST_POINTS_RATIO),
+        ("bum_points", "hips", BUM_POINTS_RATIO),
+    ):
+        base = values[from_key].value
+        values[name] = Measurement(
+            value=None if base is None else base * ratio,
+            source=DERIVED_PATTERN_PARAMETER,
+            confidence="estimated",
+            views=[],
+            status=UNAVAILABLE if base is None else ESTIMATED_PENDING,
+            method=f"population_ratio_of_{from_key}",
+            inputs={"ratio": ratio, **({f"{from_key}_mm": base} if base is not None else {})},
+            warnings=[
+                "population ratio from the GarmentCode mean body, not measured: "
+                "accept it or enter the measured value"
+            ],
+        )
 
     return MeasurementSet(values=values, warnings=warnings)
 
@@ -436,12 +686,18 @@ def apply_overrides(
         if name not in values:
             continue
         current = values[name]
+        entered = float(edit["value"])
         values[name] = Measurement(
-            value_cm=round(float(edit["value"]), 1),
-            source="tailor",
+            value=entered * 10.0 if current.unit == "mm" else entered,
+            source=OPERATOR_INPUT,
             confidence=current.confidence,
             views=current.views,
             edited=True,
             note=str(edit.get("note", "")),
+            unit=current.unit,
+            status=MANUAL_INPUT,
+            method="operator_entered_value",
+            inputs=current.inputs,
+            auto=False,
         )
     return MeasurementSet(values=values, warnings=measurements.warnings)

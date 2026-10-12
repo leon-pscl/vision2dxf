@@ -36,8 +36,13 @@ BASE_HEIGHT_CM = 164.5  # the drawn figure spans 1645 rows at 1 mm/px
 # ever shows the shoulder point moving between two captures of one subject.
 CURVATURE_WINDOW = {
     "arm_length": 5.0,
+    "arm_length_left": 5.0,
+    "arm_length_right": 5.0,
     "armscye_depth": 5.0,
     "shoulder_w": 5.0,
+    "shoulder_length": 5.0,
+    "shoulder_length_left": 5.0,
+    "shoulder_length_right": 5.0,
     "shoulder_incl": 3.5,
 }
 

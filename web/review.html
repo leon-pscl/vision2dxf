@@ -3,67 +3,188 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Review</title>
+  <title>Review — body measurement</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <main id="review" class="wide">
-    <h1>Review <output id="session-name"></output></h1>
+  <header class="bar">
+    <nav aria-label="Pages">
+      <a href="/">Capture</a>
+      <a href="/sessions.html">Sessions</a>
+      <a id="to-process" href="#">Processing</a>
+    </nav>
     <p class="row">
-      <a href="/">&larr; Capture</a>
-      <output id="review-status" class="hint">loading…</output>
+      <output id="review-status" class="meta state wait">loading…</output>
+      <button id="theme" type="button" aria-pressed="false">Dark theme</button>
     </p>
+  </header>
 
-    <p id="warnings" class="warnings" hidden></p>
+  <main id="review" class="wide">
+    <h1>Review <output id="session-name" class="meta"></output></h1>
+    <p class="hint">
+      Nothing here has been validated against standardised manual anthropometry.
+      Confidence describes how sure the detector was, not how accurate the
+      measurement is.
+    </p>
+    <p id="warnings" class="banner warn" hidden></p>
+    <p id="export-gate" class="banner" hidden></p>
 
-    <section>
-      <h2>Landmarks</h2>
-      <p class="hint">
-        Drag a point to move it, or a line to change its height. Each drag
-        recomputes only the measurements that depend on it.
-      </p>
-      <div id="views" class="views"></div>
-    </section>
+    <div class="viewer three">
+      <!-- Left: view selector and the preprocessing filmstrip. -->
+      <div class="stack">
+        <section class="card">
+          <h2 id="view-label">View</h2>
+          <div id="view-buttons" class="row" role="group" aria-labelledby="view-label"></div>
+        </section>
+        <section class="card">
+          <h2 id="strip-label">Stages</h2>
+          <ul id="filmstrip" class="filmstrip" aria-labelledby="strip-label"></ul>
+        </section>
+      </div>
 
-    <section>
-      <h2>Measurements</h2>
-      <p class="hint">
-        Values marked <span class="chip estimated">estimated</span> or
-        <span class="chip low">low</span> deserve a second look. Type a value to
-        override it; the note is written to the report.
-      </p>
-      <table id="measurements">
-        <thead>
-          <tr>
-            <th>Measurement</th>
-            <th>Value</th>
-            <th>Unit</th>
-            <th>Confidence</th>
-            <th>Source</th>
-            <th>Note</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </section>
+      <!-- Centre: the image, its overlays and the landmarks you can drag. -->
+      <div class="stack">
+        <div class="toolbar" role="group" aria-label="Viewer controls">
+          <button id="prev" type="button">Previous</button>
+          <button id="next" type="button">Next</button>
+          <button id="zoom-out" type="button">Zoom out</button>
+          <button id="zoom-in" type="button">Zoom in</button>
+          <button id="fit" type="button">Fit to screen</button>
+          <button id="compare" type="button" aria-pressed="false">Compare with raw</button>
+          <button id="side-by-side" type="button" aria-pressed="false">Side by side</button>
+          <label id="blend-label" hidden>Raw &rarr; current
+            <input id="blend" type="range" min="0" max="100" value="100" />
+          </label>
+        </div>
+        <div class="toolbar" role="group" aria-label="Overlays">
+          <button type="button" data-overlay="mask" aria-pressed="false">Mask</button>
+          <button type="button" data-overlay="contour" aria-pressed="false">Contour</button>
+          <button type="button" data-overlay="keypoints" aria-pressed="false">Keypoints</button>
+          <button type="button" data-overlay="landmarks" aria-pressed="true">Landmarks</button>
+          <button type="button" data-overlay="names" aria-pressed="true">Names</button>
+          <button type="button" data-overlay="rows" aria-pressed="true">Rows</button>
+          <button type="button" data-overlay="values" aria-pressed="false">Values</button>
+        </div>
+        <div id="frame" class="frame" tabindex="0"
+             aria-label="Image with landmarks. Tab to a landmark in the list to move it with the arrow keys."></div>
+        <details class="panel" open>
+          <summary id="stage-title">Stage details</summary>
+          <dl id="stage-details" class="pairs"></dl>
+        </details>
+        <section class="card">
+          <h2>Landmarks</h2>
+          <p class="hint">
+            Drag a point, or a row to change its height. Keyboard: choose a
+            landmark, then use the arrow keys — Shift for ten pixels at a time.
+          </p>
+          <p class="row">
+            <label class="field">Landmark
+              <select id="landmark-select"></select>
+            </label>
+            <button id="nudge-up" type="button">Up</button>
+            <button id="nudge-down" type="button">Down</button>
+            <button id="nudge-left" type="button">Left</button>
+            <button id="nudge-right" type="button">Right</button>
+            <button id="undo" type="button">Undo</button>
+            <button id="redo" type="button">Redo</button>
+            <button id="reset-landmarks" type="button">Reset to automatic</button>
+          </p>
+        </section>
+      </div>
 
-    <section>
+      <!-- Right: the numbers and where each one came from. -->
+      <div class="stack">
+        <section class="card">
+          <h2>Montazerian core measurements</h2>
+          <p class="hint">
+            Shoulder and arm length per side with the accepted mean, and the four
+            circumferences with the breadth, depth and equation behind each one.
+          </p>
+          <div id="core" class="core-grid"></div>
+        </section>
+
+        <section class="card">
+          <h2>Pattern-ready body parameters</h2>
+          <div id="groups" class="stack"></div>
+        </section>
+
+        <section class="card">
+          <h2>All measurements</h2>
+          <div class="filters" role="group" aria-label="Filter measurements">
+            <button type="button" data-filter="all" aria-pressed="true">All</button>
+            <button type="button" data-filter="core" aria-pressed="false">Core</button>
+            <button type="button" data-filter="torso" aria-pressed="false">Torso</button>
+            <button type="button" data-filter="arm" aria-pressed="false">Arms</button>
+            <button type="button" data-filter="lower" aria-pressed="false">Lower body</button>
+            <button type="button" data-filter="mesh" aria-pressed="false">Mesh</button>
+            <button type="button" data-filter="warning" aria-pressed="false">With warnings</button>
+            <button type="button" data-filter="missing" aria-pressed="false">Missing</button>
+          </div>
+          <table id="measurements">
+            <caption>
+              Select a row to see its provenance. A typed value needs a note before it is accepted.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Measurement</th>
+                <th scope="col">Automatic</th>
+                <th scope="col">Final</th>
+                <th scope="col">Unit</th>
+                <th scope="col">Status</th>
+                <th scope="col">Confidence</th>
+                <th scope="col">Method</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </section>
+
+        <section class="card">
+          <h2 id="drawer-title">Provenance</h2>
+          <div id="drawer" class="drawer" aria-labelledby="drawer-title">
+            <p class="hint">Select a measurement to see its inputs, views and warnings.</p>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Additional research measurements</h2>
+          <details class="panel">
+            <summary>Show the fields that are not primary GarmentCode keys</summary>
+            <table id="extended">
+              <thead>
+                <tr>
+                  <th scope="col">Measurement</th>
+                  <th scope="col">Value</th>
+                  <th scope="col">Unit</th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </details>
+        </section>
+      </div>
+    </div>
+
+    <section class="card">
       <h2>Finish</h2>
       <p class="row">
-        <button id="confirm-session" type="button">Confirm measurements</button>
-        <output id="confirm-out" class="hint"></output>
-      </p>
-      <p class="row">
-        <a id="download-body" href="#" download>Export body_measurements.yaml</a>
-        <a id="download-report" href="#" download>Export measurement_report.yaml</a>
-        <button id="delete-session" type="button" class="danger">Delete session</button>
+        <button id="confirm-session" type="button" class="primary">Confirm measurements</button>
+        <output id="confirm-out" class="meta"></output>
       </p>
       <p class="hint">
-        Confirming records that a tailor checked these values and starts the
-        retention clock on the photos. Deleting removes the folder with every
-        photo of this subject, and cannot be undone.
+        Confirming records that an operator checked these values and starts the
+        retention clock on the photographs.
       </p>
     </section>
+
+    <div class="sticky-action">
+      <a id="download-body" href="#" download>body_measurements.yaml</a>
+      <a id="download-extended" href="#" download>extended_measurements.yaml</a>
+      <a id="download-report" href="#" download>measurement_report.yaml</a>
+      <a id="download-csv" href="#" download>measurements.csv</a>
+      <button id="delete-session" type="button" class="danger">Delete session</button>
+    </div>
   </main>
   <script src="/app.js"></script>
 </body>

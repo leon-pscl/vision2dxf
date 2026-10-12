@@ -17,6 +17,12 @@ import numpy as np
 
 Run = tuple[int, int]
 
+# Identifiers written into the provenance record so a girth can always be
+# recomputed from the same inputs by the same equation (brief 12.1).
+ELLIPSE_EQUATION_1 = "ellipse_equation_1"
+ELLIPSE_EQUATION_2 = "ellipse_equation_2"
+MIN_SEGMENT_POINTS = 2  # fewer than two points is not a path and has no length
+
 
 def run_containing(mask: np.ndarray, y: int, x_ref: int) -> Run | None:
     """Return the inclusive ``(x_start, x_end)`` of the foreground run holding ``x_ref``.
@@ -192,3 +198,102 @@ def hull_length(
     the one-sided convex chain and is never longer than the contour itself.
     """
     return contour_length(hull_chain(points, side), mm_per_px_x, mm_per_px_y)
+
+
+def ramanujan_i(a: float, b: float) -> float:
+    """Return Ramanujan's first ellipse-perimeter approximation.
+
+    ``pi * [3(a + b) - sqrt((3a + b)(a + 3b))]``. Exact for a circle and within
+    0.04% while the axes stay within a factor of three of each other, which is
+    every human torso cross-section; it falls away on a very flat ellipse.
+
+    Raises:
+        ValueError: if either semi-axis is negative.
+
+    """
+    if a < 0 or b < 0:
+        raise ValueError("semi-axes must be non-negative")
+    return math.pi * (3 * (a + b) - math.sqrt((3 * a + b) * (a + 3 * b)))
+
+
+def ramanujan_ii(a: float, b: float) -> float:
+    """Return Ramanujan's second ellipse-perimeter approximation.
+
+    The elongated-ellipse equation: it holds to 0.01% where
+    :func:`ramanujan_i` has already drifted, so it is what a limb or a very flat
+    torso section uses.
+
+    Raises:
+        ValueError: if either semi-axis is negative.
+
+    """
+    return ellipse_perimeter(a, b)
+
+
+def ellipse_perimeter_montazerian(a: float, b: float) -> tuple[float, str]:
+    """Return a girth in mm and the identifier of the equation that produced it.
+
+    Montazerian's two-equation rule (brief 12.1): the first approximation while
+    ``a <= 3b``, the elongated-ellipse approximation beyond it. ``a`` is the
+    larger semi-axis by construction at the call site; this function sorts them
+    anyway so the rule cannot be read against the wrong axis.
+
+    Raises:
+        ValueError: if either semi-axis is negative.
+
+    """
+    major, minor = max(a, b), min(a, b)
+    if minor == 0 and major == 0:
+        return 0.0, ELLIPSE_EQUATION_1
+    if major <= 3 * minor:
+        return ramanujan_i(major, minor), ELLIPSE_EQUATION_1
+    return ramanujan_ii(major, minor), ELLIPSE_EQUATION_2
+
+
+def euclidean_length(points: np.ndarray, mm_per_px: float) -> float:
+    """Return the straight-line distance in mm between the first and last point."""
+    pts = np.asarray(points, dtype=float).reshape(-1, 2)
+    if len(pts) < MIN_SEGMENT_POINTS:
+        return 0.0
+    return float(np.hypot(*(pts[-1] - pts[0]))) * mm_per_px
+
+
+def polyline_length(points_mm: np.ndarray) -> float:
+    """Return the length in mm of a polyline whose points are already in mm."""
+    return contour_length(points_mm, 1.0, 1.0)
+
+
+def convex_hull_path_length(points_mm: np.ndarray, side: str = "front") -> float:
+    """Return the tape-path length in mm over points already in mm.
+
+    Named for the GarmentCodeData measurement family; the body is
+    :func:`hull_length`, which bridges hollows the way a tape does.
+    """
+    return hull_length(points_mm, 1.0, 1.0, side)
+
+
+def angle_deg(p1: tuple[float, float], vertex: tuple[float, float],
+              p2: tuple[float, float]) -> float:
+    """Return the angle in degrees at ``vertex`` between the rays to ``p1`` and ``p2``.
+
+    ``0.0`` when either ray has no length, because an angle at a coincident
+    point is undefined and a measurement must never be invented.
+    """
+    a = np.asarray(p1, dtype=float) - np.asarray(vertex, dtype=float)
+    b = np.asarray(p2, dtype=float) - np.asarray(vertex, dtype=float)
+    norms = float(np.linalg.norm(a)) * float(np.linalg.norm(b))
+    if norms == 0:
+        return 0.0
+    cosine = float(np.dot(a, b)) / norms
+    return math.degrees(math.acos(max(-1.0, min(1.0, cosine))))
+
+
+def montazerian_girth(width_mm: float, depth_mm: float) -> tuple[float, str]:
+    """Return a circumference in mm from a front breadth and a side depth.
+
+    The cross-section is modelled as one ellipse whose axes are the measured
+    breadth and depth, so the semi-axes are ``max/2`` and ``min/2`` and the
+    perimeter follows Montazerian's two-equation rule (brief 12.1). Returns the
+    girth and the equation identifier, both of which go into provenance.
+    """
+    return ellipse_perimeter_montazerian(max(width_mm, depth_mm) / 2, min(width_mm, depth_mm) / 2)

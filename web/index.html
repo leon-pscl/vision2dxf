@@ -3,78 +3,114 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Capture</title>
+  <title>Capture — body measurement</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <main id="capture">
-    <h1>Body measurement</h1>
+  <header class="bar">
+    <nav aria-label="Pages">
+      <a href="/" aria-current="page">Capture</a>
+      <a href="/sessions.html">Sessions</a>
+    </nav>
     <p class="row">
-      <output id="station-status" class="hint">checking…</output>
+      <output id="station-status" class="meta">checking the station…</output>
+      <button id="theme" type="button" aria-pressed="false">Dark theme</button>
+    </p>
+  </header>
+
+  <main id="capture">
+    <h1>Capture a session</h1>
+    <p class="hint">
+      A research prototype. Its measurements have not been checked against
+      standardised manual anthropometry, and must not be read as equivalent to a
+      tape measure or used for any medical purpose.
     </p>
 
-    <section>
-      <h2>1 &mdash; Subject</h2>
-      <p class="row">
-        <label>Subject code <input id="subject-id" type="text" placeholder="S014" /></label>
-        <label>Sex
+    <section class="card">
+      <h2>1 — Subject and consent</h2>
+      <div class="row">
+        <label class="field">Subject code
+          <input id="subject-id" type="text" placeholder="S014" autocomplete="off"
+                 aria-describedby="code-hint" />
+        </label>
+        <label class="field">Sex
           <select id="sex">
             <option value="F">F</option>
             <option value="M">M</option>
             <option value="other">other</option>
           </select>
         </label>
-        <label>Height (cm)
-          <input id="height-cm" type="number" min="100" max="220" step="0.1" placeholder="165.0" />
+        <label class="field">Stature (cm)
+          <input id="height-cm" type="number" min="100" max="220" step="0.1"
+                 placeholder="165.0" aria-describedby="height-hint" />
         </label>
+        <label class="field">Scale mode
+          <select id="scale-mode" aria-describedby="scale-hint"></select>
+        </label>
+        <label class="field">Garment profile
+          <select id="profile" aria-describedby="profile-hint"></select>
+        </label>
+      </div>
+      <p class="hint" id="code-hint">A code, never a name: the name is not stored anywhere.</p>
+      <p class="hint" id="height-hint">Measured by the operator, shoes off. Not the subject's own estimate.</p>
+      <p class="hint" id="scale-hint">
+        Stature converts pixels to millimetres. It is a calibration input only, and
+        is not evidence that any other measurement is accurate.
       </p>
-      <p class="hint" id="height-hint">Measured by tailor, shoes off. Do not use the client's own estimate.</p>
-      <p class="row">
-        <label class="consent">
+      <p class="hint" id="profile-hint">
+        The profile decides which fields must be present before a pattern-ready
+        export is allowed.
+      </p>
+      <p>
+        <label>
           <input id="consent" type="checkbox" />
-          The subject has been told what is captured and consents to it.
-          <output id="consent-version" class="hint"></output>
+          The subject has been told what is captured, how long it is kept, and consents to it.
         </label>
+        <output id="consent-version" class="meta"></output>
       </p>
       <p class="row">
-        <button id="start-session" type="button">Start session</button>
-        <output id="session-out"></output>
+        <button id="start-session" type="button" class="primary">Start session</button>
+        <output id="session-out" class="meta"></output>
       </p>
-      <p class="hint">Every measurement is scaled by this height, so a wrong number scales the whole body.</p>
     </section>
 
-    <section>
-      <h2>2 &mdash; Camera</h2>
+    <section class="card">
+      <h2>2 — Before you capture</h2>
+      <ul class="instructions">
+        <li>Fitted clothing: no thick layers, no loose fabric.</li>
+        <li>Shoes off, standing flat on the floor.</li>
+        <li>Hair tied flat or under a tight cap: loose hair sets the head row too high.</li>
+        <li>An uncluttered background, with nobody else in frame.</li>
+        <li>A-pose, arms 20–45° from the body and not touching it; the same posture for every view.</li>
+        <li>The camera stays where it is, at the same zoom, for every view.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>3 — Camera</h2>
       <p class="row">
         <button id="start-camera" type="button">Start camera</button>
-        <button id="start-capture" type="button" disabled>Start capture</button>
+        <button id="start-capture" type="button" class="primary" disabled>Capture all views</button>
         <span class="hint">
-          Stand inside the guide, facing the camera, arms 20&ndash;45&deg; from the body.
-          Start capture runs all three views on their own: five seconds to get
-          into the next pose, five to hold still.
+          Each shot gives you three seconds to hold still; between views there is
+          longer to turn.
         </span>
       </p>
-      <ul class="instructions">
-        <li>Shoes off, standing flat on the floor.</li>
-        <li>Hair tied flat, or a tight cap: loose hair sets the head row too high.</li>
-        <li>Fitted clothing, no thick layers or loose fabric.</li>
-        <li>A-pose, arms 20&ndash;45&deg; away from the body, not touching it.</li>
-      </ul>
-      <canvas id="preview"></canvas>
+      <canvas id="preview" aria-label="Camera preview with the pose guide"></canvas>
       <video id="source" autoplay playsinline muted hidden></video>
     </section>
 
-    <section>
-      <h2>3 &mdash; Captures</h2>
-      <p class="hint">
-        Front is required. At least one side view is required. No camera? Use a
-        stored sample, or upload a photo.
+    <section class="card">
+      <h2>4 — Views</h2>
+      <p class="row">
+        <output id="capture-progress" class="progress state wait">0 of 3 accepted</output>
+        <span class="hint">Front is required. At least one side view is required.</span>
       </p>
       <ul id="views" class="captures">
         <li data-view="front">
           <span class="view-name">Front</span>
           <button type="button" data-action="capture" disabled>Capture</button>
-          <label class="upload">or upload<input type="file" accept="image/*" /></label>
+          <label class="upload">Upload<input type="file" accept="image/jpeg,image/png,image/webp" /></label>
           <button type="button" data-action="sample" hidden>Use sample</button>
           <button type="button" data-action="retake" hidden>Retake</button>
           <output></output>
@@ -82,7 +118,7 @@
         <li data-view="side_left">
           <span class="view-name">Left side</span>
           <button type="button" data-action="capture" disabled>Capture</button>
-          <label class="upload">or upload<input type="file" accept="image/*" /></label>
+          <label class="upload">Upload<input type="file" accept="image/jpeg,image/png,image/webp" /></label>
           <button type="button" data-action="sample" hidden>Use sample</button>
           <button type="button" data-action="retake" hidden>Retake</button>
           <output></output>
@@ -90,7 +126,7 @@
         <li data-view="side_right">
           <span class="view-name">Right side</span>
           <button type="button" data-action="capture" disabled>Capture</button>
-          <label class="upload">or upload<input type="file" accept="image/*" /></label>
+          <label class="upload">Upload<input type="file" accept="image/jpeg,image/png,image/webp" /></label>
           <button type="button" data-action="sample" hidden>Use sample</button>
           <button type="button" data-action="retake" hidden>Retake</button>
           <output></output>
@@ -98,15 +134,15 @@
       </ul>
     </section>
 
-    <section>
-      <h2>4 &mdash; Measure</h2>
+    <section class="card">
+      <h2>5 — Process</h2>
       <p class="row">
-        <button id="measure" type="button" disabled>Measure</button>
-        <output id="measure-out"></output>
+        <button id="go-process" type="button" class="primary" disabled>Process this session</button>
+        <output id="measure-out" class="meta"></output>
       </p>
-      <p class="row" id="downloads" hidden>
-        <a id="download-body" href="#" download>body_measurements.yaml</a>
-        <a id="download-report" href="#" download>measurement_report.yaml</a>
+      <p class="hint">
+        Processing finds the landmarks, takes the measurements and writes the
+        provenance report. You review and correct everything afterwards.
       </p>
     </section>
   </main>

@@ -10,13 +10,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 import yaml
 from tests.synthetic.people import as_captured, make_person, make_side
 
+from bodymeasure import artifacts, store
 from bodymeasure import session as session_module
-from bodymeasure import store
 from bodymeasure.config import Calibration, load_schema
 from bodymeasure.landmarks import as_dict, load_landmarks
 from bodymeasure.session import (
@@ -34,6 +35,12 @@ from bodymeasure.session import (
 from bodymeasure.vision import ViewAnalysis
 
 HEIGHT_CM = 164.5  # the drawn figure spans 1645 rows at 1 mm/px
+
+
+def _report(session_id: str) -> dict:
+    """Return the provenance report of a session."""
+    path = session_dir(session_id) / "measurement_report.yaml"
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
 def _photo(mask: np.ndarray) -> np.ndarray:
@@ -65,9 +72,16 @@ def station(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object
     return {"front": front, "sides": sides}
 
 
-def _capture(station: dict[str, object], views: tuple[str, ...]) -> str:
+def _capture(
+    station: dict[str, object], views: tuple[str, ...], profile: str = "core_upper_body"
+) -> str:
     subject = Subject(
-        code="S014", sex="F", consent=True, height_cm=HEIGHT_CM, notes="tight clothing"
+        code="S014",
+        sex="F",
+        consent=True,
+        height_cm=HEIGHT_CM,
+        notes="tight clothing",
+        profile=profile,
     )
     session_id = create_session(subject)
     for view in views:
@@ -105,17 +119,52 @@ def test_a_session_records_its_subject_and_height(station: dict[str, object]) ->
     assert store.get_session(session_id)["status"] == "capturing"
 
 
-def test_capturing_a_view_writes_image_mask_keypoints_and_overlay(
+def test_capturing_a_view_writes_every_stage_and_manifests_it(
     station: dict[str, object],
 ) -> None:
+    """Brief 7 and 8: a measurement the operator cannot trace is not reviewable."""
     session_id = _capture(station, ("front",))
     folder = session_dir(session_id)
 
-    assert (folder / "front.jpg").exists()
-    assert (folder / "front_mask.png").exists()
-    assert (folder / "front_kp.json").exists()
+    entries = artifacts.manifest(session_id)
+    assert [entry["stage_id"] for entry in entries] == list(artifacts.STAGE_IDS[:11]), (
+        "capture produces stages 00 to 10; landmarks and measurements come later"
+    )
+    for entry in entries:
+        path = folder / str(entry["path"])
+        assert path.exists(), entry["path"]
+        assert path.stat().st_size > 0
+        assert entry["algorithm"] and entry["created_at"]
+        assert entry["width"] > 0 and entry["height"] > 0
+    assert (folder / "predictions" / "front_detections.json").exists()
+    assert (folder / "predictions" / "front_keypoints.json").exists()
     assert (folder / "debug" / "front_gate.png").exists()
     assert captured_views(session_id) == ["front"]
+
+
+def test_the_raw_capture_is_never_the_measured_image(station: dict[str, object]) -> None:
+    """Stage 00 must survive orientation, padding and enhancement untouched."""
+    session_id = _capture(station, ("front",))
+    raw = cv2.imread(str(artifacts.stage_path(session_id, "front", "00_raw")))
+    enhanced = cv2.imread(str(artifacts.stage_path(session_id, "front", "03_enhanced")))
+    assert raw.shape[:2] == _photo(station["front"].mask).shape[:2]
+    assert enhanced.shape[0] > raw.shape[0], "the enhanced frame carries the border"
+
+
+def test_a_retake_leaves_no_stage_from_the_previous_capture(
+    station: dict[str, object],
+) -> None:
+    session_id = _capture(station, ("front", "side_left"))
+    find_landmarks(session_id)
+    assert "11_landmarks" in {e["stage_id"] for e in artifacts.manifest(session_id)}
+
+    save_view(session_id, "front", _photo(station["front"].mask))
+    stages = {e["stage_id"] for e in artifacts.manifest(session_id)}
+    assert "11_landmarks" not in stages, "a retake invalidates the landmarks found before"
+    assert "00_raw" in stages
+    assert not artifacts.stage_path(session_id, "side_left", "11_landmarks").exists(), (
+        "a stale overlay on the view that was not retaken would mislead the operator"
+    )
 
 
 def test_a_good_front_capture_passes_the_gate(station: dict[str, object]) -> None:
@@ -139,8 +188,8 @@ def test_landmarks_are_found_for_every_captured_view(station: dict[str, object])
     views = {mark.view for mark in marks}
     assert views == {"front", "side_left"}
     assert (folder / "landmarks.json").exists()
-    assert (folder / "debug" / "front_marks.png").exists()
-    assert (folder / "debug" / "side_left_marks.png").exists()
+    assert artifacts.stage_path(session_id, "front", "11_landmarks").exists()
+    assert artifacts.stage_path(session_id, "side_left", "11_landmarks").exists()
 
 
 def test_each_view_stores_the_scale_its_own_rows_imply(
@@ -168,22 +217,37 @@ def test_measuring_needs_a_side_view(station: dict[str, object]) -> None:
         measure_session(session_id)
 
 
-def test_front_plus_one_side_exports_both_files(station: dict[str, object]) -> None:
+def test_front_plus_one_side_exports_the_three_files(station: dict[str, object]) -> None:
     session_id = _capture(station, ("front", "side_left"))
-    measurements = measure_session(session_id)
-    body_path, report_path = export(session_id, measurements)
+    folder = session_dir(session_id)
+    gate = export(session_id, measure_session(session_id))
+    assert gate.ok, gate.reasons
 
-    body = yaml.safe_load(body_path.read_text(encoding="utf-8"))
-    assert set(body) == {"body"}
+    body = yaml.safe_load((folder / "body_measurements.yaml").read_text(encoding="utf-8"))
+    assert set(body) == {"metadata", "body"}
     assert set(body["body"]) == set(load_schema())
     assert not any(key.startswith("_") for key in body["body"]), "pygarment recomputes those"
     assert body["body"]["height"] == HEIGHT_CM
+    assert body["metadata"]["unit"] == "cm"
+    assert body["metadata"]["validation_status"] == "unvalidated_against_manual_anthropometry"
 
-    report = yaml.safe_load(report_path.read_text(encoding="utf-8"))
-    assert report["subject_id"] == "S014"
-    assert report["side_views_used"] == ["left"]
-    assert report["values"]["bust_points"]["source"] == "default_ratio"
-    assert report["values"]["height"]["source"] == "tailor_input"
+    extended = yaml.safe_load((folder / "extended_measurements.yaml").read_text(encoding="utf-8"))
+    assert "chest" in extended["measurements"], "chest is not a primary GarmentCode key"
+    assert not set(extended["measurements"]) & set(load_schema()), (
+        "brief 3.3: extended keys must never leak into the pattern file"
+    )
+
+    records = {record["name"]: record for record in _report(session_id)["measurements"]}
+    assert records["waist"]["method"] == "montazerian_ellipse"
+    assert records["waist"]["formula"].startswith("ellipse_equation_")
+    assert records["waist"]["inputs"]["front_breadth_mm"] > 0
+    assert records["waist"]["inputs"]["side_depth_mm"] > 0
+    assert records["waist"]["validated_against_manual"] is False
+    assert records["bust_points"]["source"] == "derived_pattern_parameter"
+    assert records["bust_points"]["status"] == "estimated_pending_acceptance", (
+        "a population ratio is never an acquired measurement"
+    )
+    assert records["height"]["source"] == "operator_input"
 
 
 def test_an_uncorrected_lens_is_warned_about_in_the_report(
@@ -191,9 +255,9 @@ def test_an_uncorrected_lens_is_warned_about_in_the_report(
 ) -> None:
     """The station fixture has no lens model: frames are measured as they arrive."""
     session_id = _capture(station, ("front", "side_left"))
-    _, report_path = export(session_id, measure_session(session_id))
+    export(session_id, measure_session(session_id))
 
-    report = yaml.safe_load(report_path.read_text(encoding="utf-8"))
+    report = _report(session_id)
     assert NO_DISTORTION_WARNING in report["warnings"]
 
 
@@ -210,21 +274,24 @@ def test_a_saved_lens_model_keeps_the_warning_off(
         ),
     )
     session_id = _capture(station, ("front", "side_left"))
-    _, report_path = export(session_id, measure_session(session_id))
+    export(session_id, measure_session(session_id))
 
-    report = yaml.safe_load(report_path.read_text(encoding="utf-8"))
+    report = _report(session_id)
     assert NO_DISTORTION_WARNING not in report["warnings"]
 
 
 def test_front_plus_both_sides_also_exports(station: dict[str, object]) -> None:
     session_id = _capture(station, ("front", "side_left", "side_right"))
-    measurements = measure_session(session_id)
-    body_path, report_path = export(session_id, measurements)
+    gate = export(session_id, measure_session(session_id))
 
-    body = yaml.safe_load(body_path.read_text(encoding="utf-8"))
-    report = yaml.safe_load(report_path.read_text(encoding="utf-8"))
-    assert len(body["body"]) == 26
-    assert report["side_views_used"] == ["left", "right"]
+    body = yaml.safe_load(
+        (session_dir(session_id) / "body_measurements.yaml").read_text(encoding="utf-8")
+    )
+    assert len(body["body"]) == 26, "the pattern file carries the primary keys and no more"
+    assert set(body["body"]) == set(load_schema())
+    assert gate.ok, gate.reasons
+    views = {view for record in _report(session_id)["measurements"] for view in record["views"]}
+    assert {"side_left", "side_right"} <= views
 
 
 def test_edited_landmarks_change_the_measurements(station: dict[str, object]) -> None:
@@ -253,7 +320,7 @@ def test_edited_landmarks_change_the_measurements(station: dict[str, object]) ->
 def test_deleting_a_session_removes_every_image(station: dict[str, object]) -> None:
     session_id = _capture(station, ("front", "side_left"))
     folder = session_dir(session_id)
-    assert list(folder.glob("*.jpg"))
+    assert list(folder.glob("views/*/*.jpg"))
 
     assert store.delete_session(session_id, reason="user_request") is True
     assert not folder.exists()
@@ -273,3 +340,32 @@ def test_a_frame_with_nobody_in_it_is_refused(station: dict[str, object]) -> Non
     session_id = _capture(station, ("front",))
     with pytest.raises(ValueError, match="No person found"):
         save_view(session_id, "front", np.full((200, 200, 3), 230, dtype=np.uint8))
+
+
+def test_the_full_profile_blocks_export_until_the_estimates_are_accepted(
+    station: dict[str, object],
+) -> None:
+    """Brief 15.3: an estimated_pending_acceptance value blocks a pattern export."""
+    session_id = _capture(station, ("front", "side_left"), profile="full")
+    folder = session_dir(session_id)
+    gate = export(session_id, measure_session(session_id))
+
+    assert gate.ok is False
+    assert set(gate.blocked) == {"bust_points", "bum_points"}
+    assert not (folder / "body_measurements.yaml").exists(), (
+        "a blocked export must not leave the previous run's numbers behind"
+    )
+    assert (folder / "measurement_report.yaml").exists(), "the report is always written"
+
+    session_module.save_overrides(
+        session_id,
+        {
+            "bust_points": {"value": 17.4, "note": "measured by tape"},
+            "bum_points": {"value": 18.9, "note": "measured by tape"},
+        },
+    )
+    gate = export(session_id, measure_session(session_id))
+
+    assert gate.ok, gate.reasons
+    body = yaml.safe_load((folder / "body_measurements.yaml").read_text(encoding="utf-8"))
+    assert body["body"]["bust_points"] == 17.4

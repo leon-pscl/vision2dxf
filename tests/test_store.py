@@ -50,17 +50,22 @@ def _populate(session_id: str, body: dict[str, float] | None = None) -> Path:
     """Give a session the files a measured one would have."""
     folder = store.session_folder(session_id)
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "front.jpg").write_bytes(b"jpeg")
-    (folder / "front_mask.png").write_bytes(b"png")
-    (folder / "front_kp.json").write_text("[]", encoding="utf-8")
+    views = folder / "views" / "front"
+    views.mkdir(parents=True, exist_ok=True)
+    (views / "00_raw.jpg").write_bytes(b"jpeg")
+    (views / "07_mask_clean.png").write_bytes(b"png")
+    predictions = folder / "predictions"
+    predictions.mkdir(exist_ok=True)
+    (predictions / "front_keypoints.json").write_text("{}", encoding="utf-8")
     (folder / "landmarks.json").write_text("[]", encoding="utf-8")
+    (folder / "manifest.json").write_text("[]", encoding="utf-8")
     (folder / "debug").mkdir(exist_ok=True)
     (folder / "debug" / "front_gate.png").write_bytes(b"png")
     (folder / "body_measurements.yaml").write_text(
         yaml.safe_dump({"body": body or {"bust": 99.8, "waist": 84.3}}), encoding="utf-8"
     )
     (folder / "measurement_report.yaml").write_text(
-        yaml.safe_dump({"values": {"bust": {"edited": True}}}), encoding="utf-8"
+        yaml.safe_dump({"measurements": [{"name": "bust", "edited": True}]}), encoding="utf-8"
     )
     return folder
 
@@ -167,10 +172,10 @@ def test_purge_images_keeps_the_measurements() -> None:
 
     assert store.purge_images(today=date.today() + timedelta(days=8)) == 1
 
-    assert not (folder / "front.jpg").exists()
-    assert not (folder / "front_mask.png").exists()
-    assert not (folder / "front_kp.json").exists()
+    assert not (folder / "views").exists()
+    assert not (folder / "predictions").exists()
     assert not (folder / "debug").exists()
+    assert (folder / "manifest.json").exists(), "the index of what was there stays"
     assert (folder / "body_measurements.yaml").exists()
     assert (folder / "measurement_report.yaml").exists()
     assert (folder / "landmarks.json").exists()
@@ -183,7 +188,7 @@ def test_purge_images_leaves_sessions_inside_their_retention() -> None:
     folder = _populate(session_id)
 
     assert store.purge_images(today=date.today()) == 0
-    assert (folder / "front.jpg").exists()
+    assert (folder / "views" / "front" / "00_raw.jpg").exists()
 
 
 def test_a_crash_after_the_tmp_write_leaves_the_previous_file(tmp_path: Path) -> None:

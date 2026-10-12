@@ -14,6 +14,7 @@ from tests.synthetic.people import as_captured, make_person, make_side
 from bodymeasure import session as session_module
 from bodymeasure import store
 from bodymeasure.api import app
+from bodymeasure.artifacts import STAGE_IDS
 from bodymeasure.config import Calibration
 from bodymeasure.vision import ViewAnalysis
 
@@ -26,12 +27,16 @@ def test_health() -> None:
     body = client.get("/api/health").json()
     assert body["status"] == "ok"
     assert len(body["measurement_keys"]) == 26
+    assert body["validation_status"] == "unvalidated_against_manual_anthropometry"
+    assert body["garmentcode_commit"]
+    assert body["profiles"] and body["scale_modes"] == ["stature"]
+    assert [stage["stage_id"] for stage in body["stages"]] == list(STAGE_IDS)
 
 
 def test_index_page_is_served() -> None:
     response = client.get("/")
     assert response.status_code == 200
-    assert "Body measurement" in response.text
+    assert "Capture a session" in response.text
 
 
 def _png(image: np.ndarray) -> bytes:
@@ -64,7 +69,7 @@ def _photo(mask: np.ndarray) -> np.ndarray:
     return np.where(mask[..., None], 90, 230).astype(np.uint8).repeat(3, axis=2)
 
 
-def _open_session(height_cm: float = HEIGHT_CM) -> str:
+def _open_session(height_cm: float = HEIGHT_CM, profile: str = "full") -> str:
     response = client.post(
         "/api/sessions",
         data={
@@ -72,6 +77,7 @@ def _open_session(height_cm: float = HEIGHT_CM) -> str:
             "sex": "F",
             "consent": "true",
             "height_cm": str(height_cm),
+            "profile": profile,
         },
     )
     assert response.status_code == 201, response.text
@@ -98,7 +104,7 @@ def test_the_capture_page_offers_consent_and_three_views() -> None:
     assert 'id="consent"' in page
     for view in ("front", "side_left", "side_right"):
         assert f'data-view="{view}"' in page
-    assert 'id="measure"' in page
+    assert 'id="go-process"' in page
 
 
 def test_health_reports_whether_the_lens_is_corrected() -> None:
@@ -152,6 +158,63 @@ def test_capturing_a_view_returns_the_gate_verdict(station: dict[str, object]) -
     assert body["reasons"] == []
     assert body["views"] == ["front"]
 
+    stored = client.get(f"/api/sessions/{session_id}/views/front/gate").json()
+    assert stored == {"ok": True, "reasons": [], "captured": True}
+    missing = client.get(f"/api/sessions/{session_id}/views/side_left/gate").json()
+    assert missing["captured"] is False
+    assert missing["reasons"][0]["code"] == "NOT_CAPTURED"
+
+
+def test_an_unknown_view_never_reaches_a_path(station: dict[str, object]) -> None:
+    session_id = _open_session()
+    assert client.get(f"/api/sessions/{session_id}/views/..%2F..%2Fetc/gate").status_code == 404
+    assert client.get(f"/api/sessions/{session_id}/artifacts/front/..%2Fsubject").status_code == 404
+
+
+def test_an_unaccepted_content_type_is_refused(station: dict[str, object]) -> None:
+    session_id = _open_session()
+    file = ("image", ("front.gif", b"GIF89a", "image/gif"))
+    response = client.post(f"/api/sessions/{session_id}/views/front", files=[file])
+    assert response.status_code == 415
+    assert "not accepted" in response.json()["detail"]
+
+
+def test_every_stage_the_ui_shows_has_a_manifest_entry_and_a_file(
+    station: dict[str, object],
+) -> None:
+    """Brief 20.3: a displayed stage must correspond to a readable file."""
+    session_id = _capture_all(station, ("front", "side_left"))
+    client.post(f"/api/sessions/{session_id}/process")
+
+    payload = client.get(f"/api/sessions/{session_id}/artifacts").json()
+    assert [stage["stage_id"] for stage in payload["stages"]] == list(STAGE_IDS)
+    assert payload["manifest"], "capture and processing both write entries"
+    for entry in payload["manifest"]:
+        response = client.get(
+            f"/api/sessions/{session_id}/artifacts/{entry['view']}/{entry['stage_id']}"
+        )
+        assert response.status_code == 200, entry
+        assert response.headers["content-type"].startswith("image/")
+        assert len(response.content) > 0
+    for view in ("front", "side_left"):
+        produced = {e["stage_id"] for e in payload["manifest"] if e["view"] == view}
+        assert produced == set(STAGE_IDS), f"{view} is missing {set(STAGE_IDS) - produced}"
+
+
+def test_the_process_status_names_what_is_still_missing(
+    station: dict[str, object],
+) -> None:
+    session_id = _capture_all(station, ("front",))
+    status = client.get(f"/api/sessions/{session_id}/process/status").json()
+
+    assert status["measured"] is False
+    assert status["views"]["front"]["stages_missing"] == [
+        "11_landmarks",
+        "12_measurement_overlay",
+    ]
+    assert status["views"]["front"]["gate"]["ok"] is True
+    assert "side_left" not in status["views"]
+
 
 def test_an_upright_upload_is_not_turned_again(station: dict[str, object]) -> None:
     """The live camera is mounted portrait; a photograph off disk already is not.
@@ -182,26 +245,65 @@ def test_a_malformed_session_id_is_refused(station: dict[str, object]) -> None:
     assert response.status_code == 422
 
 
-def test_measure_returns_landmarks_and_the_26_keys(station: dict[str, object]) -> None:
+def test_processing_returns_landmarks_measurements_and_the_gate(
+    station: dict[str, object],
+) -> None:
     session_id = _capture_all(station, ("front", "side_left"))
-    body = client.post(f"/api/sessions/{session_id}/measure").json()
+    body = client.post(f"/api/sessions/{session_id}/process").json()
 
-    assert len(body["measurements"]) == 26
+    assert len(body["primary_keys"]) == 26
+    assert set(body["primary_keys"]) <= set(body["measurements"])
     assert body["measurements"]["height"]["confidence"] == "high"
-    assert body["measurements"]["bust_points"]["source"] == "default_ratio"
+    assert body["measurements"]["bust_points"]["source"] == "derived_pattern_parameter"
     assert {mark["view"] for mark in body["landmarks"]} == {"front", "side_left"}
+
+    waist = body["measurements"]["waist"]
+    assert waist["method"] == "montazerian_ellipse"
+    assert waist["validated_against_manual"] is False
+    assert waist["inputs"]["front_breadth_mm"] > 0
+    assert body["export"]["profile"] == "full"
+
+
+def test_the_export_gate_blocks_an_unaccepted_estimate(station: dict[str, object]) -> None:
+    """Brief 15.3: an estimate has to be accepted before a pattern file is written."""
+    session_id = _open_session(profile="core_upper_body")
+    for view in ("front", "side_left"):
+        _send(session_id, view, station["front"] if view == "front" else station["sides"][view])
+    body = client.post(f"/api/sessions/{session_id}/process").json()
+    assert body["export"]["ok"] is True, body["export"]["blocked"]
+
+    full = _capture_all(station, ("front", "side_left"))
+    blocked = client.post(f"/api/sessions/{full}/process").json()["export"]
+    assert blocked["ok"] is False
+    assert "bust_points" in blocked["blocked"]
+    assert client.get(f"/api/sessions/{full}/export/body").status_code == 404
+    assert client.get(f"/api/sessions/{full}/export/report").status_code == 200, (
+        "the report must be available even for a blocked session"
+    )
+
+    client.put(
+        f"/api/sessions/{full}/measurements/bust_points",
+        json={"value": 17.4, "note": "measured by tape"},
+    )
+    after = client.put(
+        f"/api/sessions/{full}/measurements/bum_points",
+        json={"value": 18.9, "note": "measured by tape"},
+    ).json()
+    assert after["export"]["ok"] is True, after["export"]["blocked"]
+    assert client.get(f"/api/sessions/{full}/export/body").status_code == 200
 
 
 def test_measuring_without_a_side_view_explains_why(station: dict[str, object]) -> None:
     session_id = _capture_all(station, ("front",))
-    response = client.post(f"/api/sessions/{session_id}/measure")
+    response = client.post(f"/api/sessions/{session_id}/process")
     assert response.status_code == 422
     assert "side view" in response.json()["detail"]
+    assert "Traceback" not in response.text
 
 
 def test_edited_landmarks_recompute_through_the_api(station: dict[str, object]) -> None:
     session_id = _capture_all(station, ("front", "side_left"))
-    first = client.post(f"/api/sessions/{session_id}/measure").json()
+    first = client.post(f"/api/sessions/{session_id}/process").json()
 
     edited = [
         {**mark, "y": mark["y"] - 50, "auto": False} if mark["name"] == "waist_row" else mark
@@ -213,28 +315,82 @@ def test_edited_landmarks_recompute_through_the_api(station: dict[str, object]) 
     assert second["measurements"]["height"]["value"] == first["measurements"]["height"]["value"]
 
 
-def test_the_exports_are_yaml_and_only_appear_after_measuring(
+def test_resetting_landmarks_throws_away_every_edit(station: dict[str, object]) -> None:
+    """Brief 11.4: reset to automatic, within the review session."""
+    session_id = _capture_all(station, ("front", "side_left"))
+    first = client.post(f"/api/sessions/{session_id}/process").json()
+    edited = [
+        {**mark, "y": mark["y"] - 50, "auto": False} if mark["name"] == "waist_row" else mark
+        for mark in first["landmarks"]
+    ]
+    client.put(f"/api/sessions/{session_id}/landmarks", json=edited)
+    client.put(
+        f"/api/sessions/{session_id}/measurements/bust_points",
+        json={"value": 17.4, "note": "tape"},
+    )
+
+    back = client.post(f"/api/sessions/{session_id}/landmarks/reset").json()
+
+    assert all(mark["auto"] for mark in back["landmarks"])
+    assert back["measurements"]["waist"]["value"] == first["measurements"]["waist"]["value"]
+    assert back["measurements"]["bust_points"]["edited"] is False
+
+
+def test_the_exports_are_yaml_and_only_appear_after_processing(
+    station: dict[str, object],
+) -> None:
+    session_id = _open_session(profile="core_upper_body")
+    for view in ("front", "side_left"):
+        _send(session_id, view, station["front"] if view == "front" else station["sides"][view])
+    assert client.get(f"/api/sessions/{session_id}/export/body").status_code == 404
+
+    client.post(f"/api/sessions/{session_id}/process")
+    body = yaml.safe_load(client.get(f"/api/sessions/{session_id}/export/body").text)
+    report = yaml.safe_load(client.get(f"/api/sessions/{session_id}/export/report").text)
+    extended = yaml.safe_load(client.get(f"/api/sessions/{session_id}/export/extended").text)
+
+    assert len(body["body"]) == 26
+    assert body["metadata"]["session_id"] == session_id
+    assert report["metadata"]["validated_against_manual"] is False
+    assert report["scale"]["stature_cm"] == HEIGHT_CM
+    assert report["artifacts"], "the report links every artifact on disk"
+    assert "chest" in extended["measurements"]
+
+
+def test_the_session_csv_carries_the_provenance_columns(
     station: dict[str, object],
 ) -> None:
     session_id = _capture_all(station, ("front", "side_left"))
-    assert client.get(f"/api/sessions/{session_id}/export").status_code == 404
+    client.post(f"/api/sessions/{session_id}/process")
+    text = client.get(f"/api/sessions/{session_id}/export/csv").text
 
-    client.post(f"/api/sessions/{session_id}/measure")
-    body = yaml.safe_load(client.get(f"/api/sessions/{session_id}/export").text)
-    report = yaml.safe_load(client.get(f"/api/sessions/{session_id}/report").text)
-
-    assert len(body["body"]) == 26
-    assert report["subject_id"] == "S014"
+    header = text.splitlines()[0].split(",")
+    assert header[:4] == ["name", "value", "unit", "status"]
+    assert "validated_against_manual" in header
+    assert "montazerian_ellipse" in text
 
 
-def test_overlays_are_served_and_missing_ones_are_404(station: dict[str, object]) -> None:
-    session_id = _capture_all(station, ("front", "side_left"))
-    client.post(f"/api/sessions/{session_id}/measure")
+def test_a_session_detail_names_the_profile_and_its_required_fields(
+    station: dict[str, object],
+) -> None:
+    session_id = _capture_all(station, ("front",))
+    body = client.get(f"/api/sessions/{session_id}").json()
 
-    response = client.get(f"/api/sessions/{session_id}/overlay/front_marks")
-    assert response.status_code == 200
-    assert response.headers["content-type"] == "image/png"
-    assert client.get(f"/api/sessions/{session_id}/overlay/nope").status_code == 404
+    assert body["profile"] == "full"
+    assert body["scale_mode"] == "stature"
+    assert body["height_cm"] == HEIGHT_CM
+    assert body["views_captured"] == ["front"]
+    assert "waist" in body["required_fields"]
+    assert client.get(f"/api/sessions/{uuid.uuid4().hex}").status_code == 404
+
+
+def test_a_stage_that_was_never_produced_is_a_404(station: dict[str, object]) -> None:
+    session_id = _capture_all(station, ("front",))
+    assert (
+        client.get(f"/api/sessions/{session_id}/artifacts/front/12_measurement_overlay").status_code
+        == 404
+    )
+    assert client.get(f"/api/sessions/{session_id}/artifacts/front/99_nope").status_code == 404
 
 
 def test_deleting_a_session_is_final(station: dict[str, object]) -> None:
@@ -248,19 +404,20 @@ def test_the_review_page_is_served_under_its_session_path(station: dict[str, obj
     response = client.get(f"/review/{session_id}")
     assert response.status_code == 200
     assert 'id="review"' in response.text
+    assert 'id="process"' in client.get(f"/process/{session_id}").text
 
 
 def test_measuring_twice_keeps_edited_landmarks(station: dict[str, object]) -> None:
     """The review page measures on load; that must not discard the tailor's work."""
     session_id = _capture_all(station, ("front", "side_left"))
-    first = client.post(f"/api/sessions/{session_id}/measure").json()
+    first = client.post(f"/api/sessions/{session_id}/process").json()
     edited = [
         {**mark, "y": mark["y"] - 50, "auto": False} if mark["name"] == "waist_row" else mark
         for mark in first["landmarks"]
     ]
     client.put(f"/api/sessions/{session_id}/landmarks", json=edited)
 
-    again = client.post(f"/api/sessions/{session_id}/measure").json()
+    again = client.post(f"/api/sessions/{session_id}/measurements/recompute").json()
     waist = next(mark for mark in again["landmarks"] if mark["name"] == "waist_row")
     assert waist["auto"] is False
     assert waist["y"] == next(
@@ -270,40 +427,54 @@ def test_measuring_twice_keeps_edited_landmarks(station: dict[str, object]) -> N
 
 def test_a_new_capture_clears_stale_landmarks(station: dict[str, object]) -> None:
     session_id = _capture_all(station, ("front", "side_left"))
-    client.post(f"/api/sessions/{session_id}/measure")
+    client.post(f"/api/sessions/{session_id}/process")
     assert (session_module.session_dir(session_id) / "landmarks.json").exists()
 
     _send(session_id, "front", station["front"])
     assert not (session_module.session_dir(session_id) / "landmarks.json").exists()
 
 
-def test_a_typed_value_is_recorded_as_the_tailors(station: dict[str, object]) -> None:
+def test_a_typed_value_is_recorded_as_the_operators(station: dict[str, object]) -> None:
     session_id = _capture_all(station, ("front", "side_left"))
-    client.post(f"/api/sessions/{session_id}/measure")
+    client.post(f"/api/sessions/{session_id}/process")
 
     body = client.put(
-        f"/api/sessions/{session_id}/values",
-        json={"bust_points": {"value": 17.4, "note": "measured by tape"}},
+        f"/api/sessions/{session_id}/measurements/bust_points",
+        json={"value": 17.4, "note": "measured by tape"},
     ).json()
     entry = body["measurements"]["bust_points"]
 
     assert entry["value"] == 17.4
     assert entry["edited"] is True
-    assert entry["source"] == "tailor"
+    assert entry["source"] == "operator_input"
+    assert entry["status"] == "manual_input"
+    assert entry["auto"] is False
     assert entry["note"] == "measured by tape"
 
-    report = yaml.safe_load(client.get(f"/api/sessions/{session_id}/report").text)
-    assert report["values"]["bust_points"]["note"] == "measured by tape"
-    assert yaml.safe_load(client.get(f"/api/sessions/{session_id}/export").text)["body"][
-        "bust_points"
-    ] == 17.4
+    records = yaml.safe_load(client.get(f"/api/sessions/{session_id}/export/report").text)
+    by_name = {record["name"]: record for record in records["measurements"]}
+    assert by_name["bust_points"]["note"] == "measured by tape"
+
+
+def test_a_typed_value_without_a_note_is_refused(station: dict[str, object]) -> None:
+    """Brief 16.3: a direct numeric override requires a note."""
+    session_id = _capture_all(station, ("front", "side_left"))
+    client.post(f"/api/sessions/{session_id}/process")
+
+    response = client.put(
+        f"/api/sessions/{session_id}/measurements/bust_points",
+        json={"value": 17.4, "note": "   "},
+    )
+    assert response.status_code == 422
+    assert "note is required" in response.json()["detail"]
 
 
 def test_a_typed_value_survives_a_later_landmark_drag(station: dict[str, object]) -> None:
     session_id = _capture_all(station, ("front", "side_left"))
-    first = client.post(f"/api/sessions/{session_id}/measure").json()
+    first = client.post(f"/api/sessions/{session_id}/process").json()
     client.put(
-        f"/api/sessions/{session_id}/values", json={"bum_points": {"value": 19.9, "note": "tape"}}
+        f"/api/sessions/{session_id}/measurements/bum_points",
+        json={"value": 19.9, "note": "tape"},
     )
 
     edited = [
@@ -318,7 +489,7 @@ def test_a_typed_value_survives_a_later_landmark_drag(station: dict[str, object]
 
 def test_the_index_lists_sessions_and_filters_by_status(station: dict[str, object]) -> None:
     session_id = _capture_all(station, ("front", "side_left"))
-    client.post(f"/api/sessions/{session_id}/measure")
+    client.post(f"/api/sessions/{session_id}/process")
 
     listed = client.get("/api/sessions").json()
     assert [row["id"] for row in listed] == [session_id]
@@ -329,7 +500,7 @@ def test_the_index_lists_sessions_and_filters_by_status(station: dict[str, objec
 
 def test_confirming_starts_the_retention_clock(station: dict[str, object]) -> None:
     session_id = _capture_all(station, ("front", "side_left"))
-    client.post(f"/api/sessions/{session_id}/measure")
+    client.post(f"/api/sessions/{session_id}/process")
 
     body = client.post(f"/api/sessions/{session_id}/confirm").json()
 
@@ -345,8 +516,10 @@ def test_confirming_an_unknown_session_is_a_404(station: dict[str, object]) -> N
 
 
 def test_the_csv_export_covers_confirmed_sessions_only(station: dict[str, object]) -> None:
-    session_id = _capture_all(station, ("front", "side_left"))
-    client.post(f"/api/sessions/{session_id}/measure")
+    session_id = _open_session(profile="core_upper_body")
+    for view in ("front", "side_left"):
+        _send(session_id, view, station["front"] if view == "front" else station["sides"][view])
+    client.post(f"/api/sessions/{session_id}/process")
     assert "S014" not in client.get("/api/export.csv").text
 
     client.post(f"/api/sessions/{session_id}/confirm")
@@ -359,15 +532,15 @@ def test_the_csv_export_covers_confirmed_sessions_only(station: dict[str, object
 
 def test_edits_reach_the_audit_trail(station: dict[str, object]) -> None:
     session_id = _capture_all(station, ("front", "side_left"))
-    first = client.post(f"/api/sessions/{session_id}/measure").json()
+    first = client.post(f"/api/sessions/{session_id}/process").json()
     edited = [
         {**mark, "y": mark["y"] - 40, "auto": False} if mark["name"] == "waist_row" else mark
         for mark in first["landmarks"]
     ]
     client.put(f"/api/sessions/{session_id}/landmarks", json=edited)
     client.put(
-        f"/api/sessions/{session_id}/values",
-        json={"bust_points": {"value": 17.4, "note": "tape"}},
+        f"/api/sessions/{session_id}/measurements/bust_points",
+        json={"value": 17.4, "note": "tape"},
     )
 
     trail = store.list_edits(session_id)

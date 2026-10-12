@@ -155,7 +155,7 @@ def _two_people() -> np.ndarray:
 
 def test_the_largest_person_wins_and_other_classes_are_ignored() -> None:
     result = _Result(_two_people(), np.array([0, 0, 16]), np.array([0.9, 0.8, 0.99]))
-    mask = vision._largest_person_mask(result, (40, 40), 0.5)
+    mask = vision._largest_person_mask(result, (40, 40), 0.5).mask
     assert mask[20, 20], "should pick the larger of the two people"
     assert not mask[32, 32], "the dog is not a person"
     assert mask.sum() == 900, "the smaller person must not be merged in"
@@ -172,20 +172,20 @@ def _split_body() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 def test_a_body_split_into_two_instances_is_rejoined() -> None:
     """Half a mask would scale every measurement off the wrong floor row."""
     masks, classes, confidences = _split_body()
-    mask = vision._largest_person_mask(_Result(masks, classes, confidences), (40, 40), 0.15)
+    mask = vision._largest_person_mask(_Result(masks, classes, confidences), (40, 40), 0.15).mask
     assert mask.sum() == 800, "both halves are one body"
     assert mask[5, 5] and mask[35, 5]
 
 
 def test_people_below_the_confidence_threshold_are_dropped() -> None:
     result = _Result(_two_people(), np.array([0, 0, 0]), np.array([0.9, 0.3, 0.2]))
-    mask = vision._largest_person_mask(result, (40, 40), 0.5)
+    mask = vision._largest_person_mask(result, (40, 40), 0.5).mask
     assert mask.sum() == 100, "only the small, confident person survives"
 
 
 def test_a_mask_at_model_resolution_is_resized_to_the_frame() -> None:
     result = _Result(_two_people(), np.array([0, 0, 0]), np.array([0.9, 0.9, 0.9]))
-    mask = vision._largest_person_mask(result, (80, 80), 0.5)
+    mask = vision._largest_person_mask(result, (80, 80), 0.5).mask
     assert mask.shape == (80, 80)
     assert mask[40, 40]
 
@@ -210,3 +210,12 @@ def test_the_most_confident_pose_is_taken() -> None:
 def test_a_pose_result_with_nobody_is_reported() -> None:
     with pytest.raises(ValueError, match="No person found"):
         vision._best_keypoints(_Result())
+
+
+def test_the_detection_carries_its_box_confidence_and_rival_count() -> None:
+    """Stage 04 shows the operator which instance was chosen, and how sure of it."""
+    result = _Result(_two_people(), np.array([0, 0, 0]), np.array([0.9, 0.8, 0.7]))
+    detection = vision._largest_person_mask(result, (40, 40), 0.5)
+    assert detection.box == (0, 0, 34, 34), "the union of the merged instances"
+    assert detection.confidence == pytest.approx(0.8), "the best of the instances kept"
+    assert detection.instances == 3, "all three passed the threshold and must be reported"

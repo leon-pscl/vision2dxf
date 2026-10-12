@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Processing — body measurement</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="bar">
+    <nav aria-label="Pages">
+      <a href="/">Capture</a>
+      <a href="/sessions.html">Sessions</a>
+      <a id="to-review" href="#">Review</a>
+    </nav>
+    <p class="row">
+      <output id="process-status" class="meta state wait">loading…</output>
+      <button id="theme" type="button" aria-pressed="false">Dark theme</button>
+    </p>
+  </header>
+
+  <main id="process" class="wide">
+    <h1>Processing <output id="session-name" class="meta"></output></h1>
+    <p id="process-error" class="banner bad" hidden></p>
+
+    <section class="card">
+      <h2>Pipeline</h2>
+      <p class="row">
+        <label class="field">View
+          <select id="view-select"></select>
+        </label>
+        <button id="run" type="button" class="primary">Run processing</button>
+        <button id="retry" type="button">Retry from the failed stage</button>
+        <button id="cancel" type="button">Cancel</button>
+      </p>
+      <p class="hint">
+        Nothing is hidden once it is done: every stage below stays on disk and
+        stays viewable, and a stage that fails leaves the earlier ones intact.
+      </p>
+
+      <div class="viewer two">
+        <div>
+          <h3 id="strip-label">Stages</h3>
+          <ul id="filmstrip" class="filmstrip" aria-labelledby="strip-label"></ul>
+        </div>
+        <div class="stack">
+          <div class="toolbar" role="group" aria-label="Viewer controls">
+            <button id="prev" type="button">Previous</button>
+            <button id="next" type="button">Next</button>
+            <button id="zoom-out" type="button">Zoom out</button>
+            <button id="zoom-in" type="button">Zoom in</button>
+            <button id="fit" type="button">Fit to screen</button>
+            <button id="compare" type="button" aria-pressed="false">Compare with raw</button>
+            <label id="blend-label" hidden>Raw &rarr; current
+              <input id="blend" type="range" min="0" max="100" value="100" />
+            </label>
+          </div>
+          <div id="frame" class="frame"></div>
+          <details class="panel" open>
+            <summary id="stage-title">Stage details</summary>
+            <dl id="stage-details" class="pairs"></dl>
+          </details>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

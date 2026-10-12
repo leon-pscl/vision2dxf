@@ -26,12 +26,20 @@ class CameraConfig(_Strict):
 
 
 class ModelsConfig(_Strict):
-    """Paths to the YOLO26 weights and the inference image size."""
+    """Paths to the YOLO26 weights, their hashes, and the inference image size.
+
+    A hash is optional so a station can run fine-tuned weights that have not been
+    published yet, but when one is configured it is enforced: the app refuses to
+    measure with a weight file that is not the one the results were recorded
+    against (brief 5).
+    """
 
     seg: str
     pose: str
     imgsz: int
     retina_masks: bool
+    seg_sha256: str | None = None
+    pose_sha256: str | None = None
 
 
 class PathsConfig(_Strict):
@@ -51,6 +59,21 @@ class StorageConfig(_Strict):
     consent_version: str
 
 
+class UploadsConfig(_Strict):
+    """What an upload may be, so a hostile file cannot reach the decoder (brief 17)."""
+
+    max_bytes: int
+    max_pixels: int
+    allowed_types: list[str]
+
+
+class GarmentCodeConfig(_Strict):
+    """The pinned GarmentCode revision the export is written for (brief 3.2)."""
+
+    commit: str
+    repository: str
+
+
 class AppConfig(_Strict):
     """Contents of ``config/app.yaml``."""
 
@@ -58,6 +81,10 @@ class AppConfig(_Strict):
     models: ModelsConfig
     thresholds: dict[str, float]
     defaults: dict[str, float]
+    enhance: dict[str, float]
+    uploads: UploadsConfig
+    garmentcode: GarmentCodeConfig
+    profiles: dict[str, list[str]]
     paths: PathsConfig
     storage: StorageConfig
 
@@ -90,6 +117,16 @@ def _read_yaml(path: Path) -> dict[str, Any]:
 def load_app_config(path: Path | None = None) -> AppConfig:
     """Return the validated application configuration."""
     return AppConfig(**_read_yaml(path or CONFIG_DIR / "app.yaml"))
+
+
+def required_fields(profile: str) -> list[str]:
+    """Return the body keys the named garment profile must have before export.
+
+    Raises:
+        KeyError: if the profile is not configured.
+
+    """
+    return list(load_app_config().profiles[profile])
 
 
 @lru_cache(maxsize=1)

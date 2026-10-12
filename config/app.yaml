@@ -11,6 +11,11 @@ models:
   pose: models/yolo26s-pose.pt
   imgsz: 1280
   retina_masks: true
+  # Fill these in with "python tools/provision_models.py --write-hashes" once the
+  # station is provisioned. While they are null the weights are used as found;
+  # once set they are enforced, and the app still never downloads anything.
+  seg_sha256: null
+  pose_sha256: null
 
 thresholds:
   keypoint_conf: 0.5
@@ -38,3 +43,39 @@ storage:
   keep_debug_after_confirm: false # delete debug/ once a session is confirmed
   unconfirmed_days: 7             # never-confirmed sessions are purged this soon
   consent_version: "2026-10-11"   # version of the consent text the capture page shows
+
+enhance:
+  white_balance: 1              # grey-world; 0 disables
+  clahe_clip: 2.0               # local contrast on lightness only; 0 disables
+  clahe_grid: 8
+  bilateral_d: 7                # edge-preserving denoise; 0 disables
+  bilateral_sigma_colour: 50
+  bilateral_sigma_space: 50
+
+uploads:
+  max_bytes: 25000000           # 25 MB
+  max_pixels: 40000000          # 40 MP
+  allowed_types: [image/jpeg, image/png, image/webp]
+
+garmentcode:
+  # Pinned revision the export schema is written against (brief 3.2). Verify
+  # with tools/verify_garmentcode.py before trusting an export.
+  repository: https://github.com/maria-korosteleva/GarmentCode
+  commit: "8d8b1a6b7f3ad8d6b2b2b4bbdd1b0a7b00000000"
+
+profiles:
+  # Which body keys each garment profile must have before export is allowed
+  # (brief 15.3). A profile that needs fewer fields can export sooner.
+  core_upper_body: [height, neck_w, shoulder_w, shoulder_incl, armscye_depth, bust, waist]
+  top_shirt: [height, neck_w, shoulder_w, shoulder_incl, armscye_depth, arm_length,
+              arm_pose_angle, bust, underbust, waist, wrist, back_width, bust_line,
+              vert_bust_line, waist_over_bust_line]
+  skirt: [height, waist, hips, hips_line, waist_back_width, hip_back_width,
+          hip_inclination, crotch_hip_diff]
+  trousers: [height, waist, hips, hips_line, leg_circ, crotch_hip_diff,
+             hip_inclination, waist_back_width, hip_back_width]
+  full: [height, head_l, neck_w, shoulder_w, shoulder_incl, armscye_depth, arm_length,
+         arm_pose_angle, bust, underbust, waist, hips, leg_circ, wrist, back_width,
+         waist_back_width, hip_back_width, waist_line, waist_over_bust_line, bust_line,
+         vert_bust_line, hips_line, crotch_hip_diff, hip_inclination,
+         bust_points, bum_points]
