@@ -68,3 +68,38 @@ export function niceRulerMm(pxPerMm: number, maxPx = 140): number {
   const steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
   return steps.find((s) => s >= target) ?? 1000
 }
+
+/* ---- comparison viewer --------------------------------------------------- */
+
+export type CompareMode = 'overlay' | 'base' | 'target' | 'slider'
+
+export const COMPARE_MODE_LABELS: Record<CompareMode, string> = {
+  overlay: 'Overlay',
+  base: 'Base only',
+  target: 'Transformed only',
+  slider: 'Slider',
+}
+
+/** The comparison layers that stand for the base block rather than the result. */
+export const BASE_LAYERS: LayerName[] = ['base']
+
+/**
+ * Which layers a comparison mode shows. `base` is the untransformed block and every
+ * other layer draws the result, so a mode is just a choice of which of the two to keep.
+ * The slider keeps both and wipes between them instead, which is a clip, not a layer.
+ */
+export function visibleLayers(mode: CompareMode, available: LayerName[], extras: LayerName[]): LayerName[] {
+  const isBase = (layer: LayerName) => BASE_LAYERS.includes(layer)
+  return available.filter((layer) => {
+    if (extras.includes(layer)) return true
+    if (mode === 'base') return isBase(layer)
+    if (mode === 'target') return !isBase(layer)
+    return true
+  })
+}
+
+/** Clip inset for the slider wipe: the result is revealed from the left. */
+export function wipeInset(fraction: number): string {
+  const pct = Math.min(100, Math.max(0, fraction * 100))
+  return `inset(0 ${(100 - pct).toFixed(2)}% 0 0)`
+}

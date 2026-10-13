@@ -10,7 +10,11 @@ RUN npm run build          # vite outDir is ../backend/app/static -> /build/back
 
 
 # ---- stage 2: python app + runtime deps -------------------------------------
-FROM python:3.12-slim AS app
+# ponytail: pinned to 3.13 because app/base_block, app/transformation and
+# app/validation/topology exist only as CPython 3.13 .pyc files (see RECONSTRUCTION.md).
+# Bytecode is version-locked, so this image cannot move to another Python until real
+# source for those modules is recovered. Drop this comment and float the version then.
+FROM python:3.13-slim AS app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -34,7 +38,6 @@ FROM app AS test
 RUN pip install --no-cache-dir pytest==8.3.4 httpx==0.28.1
 COPY backend/tests/ /srv/backend/tests/
 COPY backend/pytest.ini /srv/backend/pytest.ini
-COPY scripts/ /srv/scripts/
 WORKDIR /srv/backend
 CMD ["python", "-m", "pytest"]
 

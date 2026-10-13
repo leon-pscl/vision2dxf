@@ -4,6 +4,11 @@ docs
 **/node_modules
 **/__pycache__
 **/*.pyc
+# ...except the modules that survive only as bytecode. Without these the image builds
+# and then fails to import app.base_block.loader. See RECONSTRUCTION.md.
+!backend/app/base_block/*.pyc
+!backend/app/transformation/*.pyc
+!backend/app/validation/*.pyc
 **/.pytest_cache
 backend/requirements-dev.txt
 backend/app/static

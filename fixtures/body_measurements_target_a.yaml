@@ -1,0 +1,29 @@
+# Target profile A: a body larger than the one the base blocks are declared to fit, with
+# every difference inside the tested envelope. Girth, width and the waist level all grow.
+body:
+  arm_length: 64.0
+  arm_pose_angle: 47.0
+  armscye_depth: 21.0
+  back_width: 41.5
+  bum_points: 18.4
+  bust: 94.0
+  bust_line: 30.2
+  bust_points: 15.3
+  crotch_hip_diff: 22.7
+  head_l: 21.1
+  height: 170.0
+  hip_back_width: 53.0
+  hip_inclination: 7.5
+  hips: 106.0
+  hips_line: 22.5
+  leg_circ: 58.0
+  neck_w: 17.0
+  shoulder_incl: 45.0
+  shoulder_w: 18.0
+  underbust: 92.0
+  vert_bust_line: 36.6
+  waist: 92.0
+  waist_back_width: 41.0
+  waist_line: 42.5
+  waist_over_bust_line: 30.4
+  wrist: 16.8

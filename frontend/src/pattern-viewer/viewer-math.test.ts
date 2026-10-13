@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { firstIncompleteStep, STEPS, type StepId } from '../steps'
-import { clampScale, distanceMm, formatMm, niceRulerMm, pan, zoomAt } from './viewer-math'
+import {
+  clampScale,
+  distanceMm,
+  formatMm,
+  niceRulerMm,
+  pan,
+  visibleLayers,
+  wipeInset,
+  zoomAt,
+  type LayerName,
+} from './viewer-math'
 
 describe('viewer transforms', () => {
   it('keeps the point under the cursor fixed while zooming', () => {
@@ -54,5 +64,31 @@ describe('workflow steps', () => {
     expect(firstIncompleteStep(ready)).toBe(STEPS.length - 1)
     ready.definitions = false
     expect(firstIncompleteStep(ready)).toBe(STEPS.findIndex((s) => s.id === 'definitions'))
+  })
+})
+
+describe('comparison modes', () => {
+  const available: LayerName[] = ['base', 'sewing', 'cutting', 'displacement']
+
+  it('shows both blocks on overlay and on the slider', () => {
+    expect(visibleLayers('overlay', available, [])).toEqual(available)
+    expect(visibleLayers('slider', available, [])).toEqual(available)
+  })
+
+  it('keeps only one block in the single-block modes', () => {
+    expect(visibleLayers('base', available, [])).toEqual(['base'])
+    expect(visibleLayers('target', available, [])).toEqual(['sewing', 'cutting', 'displacement'])
+  })
+
+  it('keeps a pinned overlay visible in every mode', () => {
+    expect(visibleLayers('base', available, ['displacement'])).toEqual(['base', 'displacement'])
+  })
+
+  it('wipes from the left and clamps out-of-range fractions', () => {
+    expect(wipeInset(0)).toBe('inset(0 100.00% 0 0)')
+    expect(wipeInset(0.25)).toBe('inset(0 75.00% 0 0)')
+    expect(wipeInset(1)).toBe('inset(0 0.00% 0 0)')
+    expect(wipeInset(2)).toBe('inset(0 0.00% 0 0)')
+    expect(wipeInset(-1)).toBe('inset(0 100.00% 0 0)')
   })
 })

@@ -1,0 +1,30 @@
+# Target profile B: a body smaller than the one the base blocks are declared to fit.
+# Every difference runs the opposite way to target A, so a transformation that only
+# works in one direction shows up.
+body:
+  arm_length: 61.0
+  arm_pose_angle: 47.0
+  armscye_depth: 19.3
+  back_width: 36.8
+  bum_points: 17.0
+  bust: 79.0
+  bust_line: 28.7
+  bust_points: 13.9
+  crotch_hip_diff: 22.7
+  head_l: 21.1
+  height: 164.0
+  hip_back_width: 48.0
+  hip_inclination: 7.5
+  hips: 95.0
+  hips_line: 22.5
+  leg_circ: 53.0
+  neck_w: 16.0
+  shoulder_incl: 45.0
+  shoulder_w: 16.3
+  underbust: 80.0
+  vert_bust_line: 35.2
+  waist: 79.5
+  waist_back_width: 36.5
+  waist_line: 39.9
+  waist_over_bust_line: 29.4
+  wrist: 15.7

@@ -1,0 +1,24 @@
+#!/bin/sh
+# Refuse to commit a large file. The GarmageSet library is 2.9 GB and is a prerequisite
+# the developer downloads, never something this repository carries; `.gitignore` keeps
+# /templates/ out, and this catches anything else that would bloat the history.
+#
+# Enable it once per clone:  git config core.hooksPath .githooks
+# Bypass it for one commit:  git commit --no-verify
+
+limit_kb=5120
+
+too_big=$(
+  git diff --cached --name-only --diff-filter=AM -z |
+    while IFS= read -r -d '' file; do
+      [ -f "$file" ] || continue
+      kb=$(du -k "$file" | cut -f1)
+      [ "$kb" -gt "$limit_kb" ] && printf '  %s (%s KB)\n' "$file" "$kb"
+    done
+)
+
+if [ -n "$too_big" ]; then
+  printf 'Refusing to commit: these files are over %s KB.\n%s\n' "$limit_kb" "$too_big"
+  printf 'Add them to .gitignore, or commit with --no-verify if they really belong here.\n'
+  exit 1
+fi

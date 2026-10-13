@@ -11,6 +11,27 @@ redrafted from a sequence of drafting formulas, no model is trained, and no
 three-dimensional surface is created and flattened. No field meaning is inferred from its
 name.
 
+## Before you run it
+
+**Download the GarmageSet pattern library and put it at `templates/` in this repository.**
+It is 2.9 GB of pattern JSON, one file per garment set, named after the hash of its own
+contents. It is a developer prerequisite, not part of this repository: `.gitignore`
+excludes `/templates/`, and a `pre-commit` hook refuses any file over 5 MB so it cannot be
+committed by accident. Enable the hook once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The three catalogued base blocks are committed under `assets/base-blocks/templates/`, so
+the application itself runs without the library. You need it to select a template the
+catalog does not list (`template:<file>.json`), and `docker-compose.yml` mounts it
+read-only at `/srv/templates` for exactly that.
+
+> Parts of this repository were lost and rebuilt rather than recovered, including the
+> whole of `transformation.yaml`. See [RECONSTRUCTION.md](RECONSTRUCTION.md) for every
+> value that was chosen rather than carried over, before relying on a generated pattern.
+
 ## Run it
 
 ```bash
