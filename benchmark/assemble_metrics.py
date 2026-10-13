@@ -116,6 +116,18 @@ def assemble() -> dict:
         if row.get("bound_violation") == "True" and row["warmup"] == "False"
     )
 
+    # A control case exists to be refused, so counting its refusals as invalid output
+    # would make `all_cases_valid` permanently false and say nothing about the design.
+    # It is judged the other way round: it passed if it refused, with a structured code.
+    control = {c["case_id"] for c in cfg["cases"] if c["role"] == "control"}
+    control_rows = [row for row in trials
+                    if row["case_id"] in control and row["warmup"] == "False"]
+    control_codes = sorted({row["error_code"] for row in control_rows
+                            if row["error_code"]})
+    control_refused_as_expected = bool(control_rows) and all(
+        row["valid_output"] != "True" for row in control_rows
+    )
+
     return {
         "design": DESIGN,
         # Metric 1 - Python-tracked peak memory, median across mandatory measured trials.
@@ -130,9 +142,15 @@ def assemble() -> dict:
         # Metric 5 - source-line-weighted Radon MI on the 0-100 scale.
         "maintainability_index_0_100": round(mi, 6) if mi is not None else None,
         "mandatory_cases": len(mandatory),
+        "control_cases": len(control),
         "measured_memory_trials_per_case": len(memory),
         "measured_time_trials_per_case": len(timing),
-        "all_cases_valid": all(complete.values()) and not any(per_case_failures.values()),
+        # Judged over the mandatory cases only: a control case is supposed to be refused,
+        # so counting it here would make this permanently false.
+        "all_cases_valid": all(complete.values()) and not any(
+            per_case_failures[case_id] for case_id in mandatory
+        ),
+        "control_cases_refused_as_expected": control_refused_as_expected,
         "garmageset_source_sha256": base_block.get("source_sha256"),
         "base_block_version": base_block.get("base_block_version"),
         "commit_hash": git_state()["commitHash"],
@@ -146,6 +164,9 @@ def assemble() -> dict:
             "mandatoryCases": sorted(mandatory),
             "everyMandatoryCaseFullyMeasured": complete,
             "measuredTrialFailuresPerCase": per_case_failures,
+            "controlCases": sorted(control),
+            "controlCasesRefusedAsExpected": control_refused_as_expected,
+            "controlRefusalCodes": control_codes,
             "measuredBoundViolations": bound_violations,
             "unmeasured": ["feature_completeness_macro_pct", "feature_completeness_micro_pct",
                            "pattern_dimension_mae_cm"],
