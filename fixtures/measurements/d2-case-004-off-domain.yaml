@@ -1,0 +1,50 @@
+# Design 2 benchmark case fixture. Frozen before any measured trial ran.
+#
+# Pseudonymous: carries no participant name and no direct identifier. The engine
+# consumes only confirmed values, converted to millimetres internally.
+#
+# Control case, not a mandatory one. It lies outside Design 2's declared supported domain
+# and must be refused with a structured code rather than generated, so that the failure
+# policy is exercised and the refusal stays in the log instead of being quietly dropped. A
+# run in which this case succeeds means something is wrong.
+case:
+  case_id: d2-case-004-off-domain
+  profile: off_domain
+  role: control
+  unit: cm
+  value_status: confirmed
+  provenance: >-
+    Deliberately out-of-domain measurement set. Retained as a control: it must be refused
+    with a structured code, not generated.
+  approval_status: approved
+  approved_by: project-lead
+  approval_date: '2026-10-13'
+  contains_direct_identifier: false
+
+body:
+  arm_length: 80.9
+  arm_pose_angle: 62.5
+  armscye_depth: 32.3
+  back_width: 54.0
+  bum_points: 20.2
+  bust: 115.0
+  bust_line: 64.0
+  bust_points: 19.6
+  crotch_hip_diff: 58.2
+  head_l: 17.1
+  height: 167.0
+  hip_back_width: 54.0
+  hip_inclination: 0.0
+  hips: 115.0
+  hips_line: 0.1
+  leg_circ: 46.5
+  neck_w: 18.9
+  shoulder_incl: 35.2
+  shoulder_w: 35.1
+  underbust: 115.0
+  vert_bust_line: 68.7
+  waist: 115.1
+  waist_back_width: 54.1
+  waist_line: 76.9
+  waist_over_bust_line: 64.0
+  wrist: 20.5

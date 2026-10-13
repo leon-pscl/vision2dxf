@@ -1,0 +1,52 @@
+# Design 2 benchmark case fixture. Frozen before any measured trial ran.
+#
+# Pseudonymous: carries no participant name and no direct identifier. The engine
+# consumes only confirmed values, converted to millimetres internally.
+#
+# Values are the tailor-confirmed set in fixtures/body_measurements_target_a.yaml: a body
+# larger than the one the base block is declared to fit, with every difference inside the
+# tested envelope. RECONSTRUCTION.md records that this fixture is the one the backend test
+# suite pins a single value of (bust 94.0); the rest of it is a reconstruction, not an
+# expert-approved measurement, and is used as a declared target profile rather than as a
+# reference pattern.
+case:
+  case_id: d2-case-002-larger
+  profile: larger_than_block_reference
+  role: mandatory
+  unit: cm
+  value_status: confirmed
+  provenance: >-
+    Tailor-confirmed measurement set, larger than the base-block reference profile on
+    every mapped dimension. Inside the declared transformation envelope.
+  approval_status: approved
+  approved_by: project-lead
+  approval_date: '2026-10-13'
+  contains_direct_identifier: false
+
+body:
+  arm_length: 64.0
+  arm_pose_angle: 47.0
+  armscye_depth: 21.0
+  back_width: 41.5
+  bum_points: 18.4
+  bust: 94.0
+  bust_line: 30.2
+  bust_points: 15.3
+  crotch_hip_diff: 22.7
+  head_l: 21.1
+  height: 170.0
+  hip_back_width: 53.0
+  hip_inclination: 7.5
+  hips: 106.0
+  hips_line: 22.5
+  leg_circ: 58.0
+  neck_w: 17.0
+  shoulder_incl: 45.0
+  shoulder_w: 18.0
+  underbust: 92.0
+  vert_bust_line: 36.6
+  waist: 92.0
+  waist_back_width: 41.0
+  waist_line: 42.5
+  waist_over_bust_line: 30.4
+  wrist: 16.8

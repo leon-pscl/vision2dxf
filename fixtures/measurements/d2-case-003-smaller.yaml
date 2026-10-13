@@ -1,0 +1,50 @@
+# Design 2 benchmark case fixture. Frozen before any measured trial ran.
+#
+# Pseudonymous: carries no participant name and no direct identifier. The engine
+# consumes only confirmed values, converted to millimetres internally.
+#
+# Values are the tailor-confirmed set in fixtures/body_measurements_target_b.yaml: a body
+# smaller than the one the base block is declared to fit, every difference running the
+# opposite way to the larger case, so a transformation that only works in one direction
+# shows up. RECONSTRUCTION.md records this fixture as a reconstruction.
+case:
+  case_id: d2-case-003-smaller
+  profile: smaller_than_block_reference
+  role: mandatory
+  unit: cm
+  value_status: confirmed
+  provenance: >-
+    Tailor-confirmed measurement set, smaller than the base-block reference profile on
+    every mapped dimension. Inside the declared transformation envelope.
+  approval_status: approved
+  approved_by: project-lead
+  approval_date: '2026-10-13'
+  contains_direct_identifier: false
+
+body:
+  arm_length: 61.0
+  arm_pose_angle: 47.0
+  armscye_depth: 19.3
+  back_width: 36.8
+  bum_points: 17.0
+  bust: 79.0
+  bust_line: 28.7
+  bust_points: 13.9
+  crotch_hip_diff: 22.7
+  head_l: 21.1
+  height: 164.0
+  hip_back_width: 48.0
+  hip_inclination: 7.5
+  hips: 95.0
+  hips_line: 22.5
+  leg_circ: 53.0
+  neck_w: 16.0
+  shoulder_incl: 45.0
+  shoulder_w: 16.3
+  underbust: 80.0
+  vert_bust_line: 35.2
+  waist: 79.5
+  waist_back_width: 36.5
+  waist_line: 39.9
+  waist_over_bust_line: 29.4
+  wrist: 15.7

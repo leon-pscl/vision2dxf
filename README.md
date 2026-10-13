@@ -257,6 +257,12 @@ before and after balancing.
 | `backend/app/config/drafting.yaml` | geometry tolerances, ease presets, seam allowances, paper sizes, fixture defaults |
 | `assets/base-blocks/catalog.yaml` | the blocks on offer, their pinned hashes, the declared reference body |
 
+## Benchmark
+
+The Chapter 3 metrics for this design — peak memory, generation time and maintainability —
+are measured by the harness in `benchmark/`, against one frozen base block. See
+[benchmark/README.md](benchmark/README.md) for how to run it and what each number means.
+
 ## Fixture-compatible defaults
 
 `sample/000c79de6519526691ff7b988eb6b92a.json` is the schema fixture. Keys whose meaning

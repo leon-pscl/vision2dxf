@@ -1,0 +1,164 @@
+# Frozen benchmark configuration for Design 2.
+#
+# Changing any value here increments `configuration_version` and invalidates every
+# earlier result: the final metrics are only meaningful against one frozen configuration.
+#
+# The transformation settings themselves are NOT here. They live in
+# backend/app/config/*.yaml, which is the single frozen configuration the engine reads.
+configuration_version: "1.0.0"
+
+# ---- the one fixed base block -----------------------------------------------
+#
+# Design 2 always transforms this block and never searches among templates. The file is
+# the GarmageSet template the block was derived from, byte-for-byte unmodified and pinned
+# by the sha256 the catalog also pins; `run_design_2.py` refuses to start if the two
+# disagree or if the block fails to load. Any change to the block is a new
+# `base_block_version` and a complete rerun of every trial.
+#
+# Why this block and not the other two catalogued ones: bodice-ref-c carries a defect of
+# its own (paired seams differ by up to 4.8 mm in the source pattern), which makes it fail
+# the common validator on the smaller case, so it cannot serve as the frozen block.
+base_block:
+  id: bodice-ref-a
+  version: "1.0.0"
+  reviewed: true
+  source_dataset: GarmageSet
+  source_file: assets/base-blocks/templates/5f8a1865c9aa84855f6122db55ad4e93.json
+  source_sha256: 907f8fa2b0fadfe665b938c72581aa7c9ce5378f4d2f3ace6a6d99cc483df053
+  # The GarmageSet template carries no unit declaration anywhere in its schema, so the
+  # unit is an assumption and is recorded as one rather than as a verified fact. The
+  # coordinate magnitudes confirm it (a bodice is hundreds of units tall, not tens).
+  source_unit: null
+  source_unit_documented: false
+  unit_assumption: millimetres
+  internal_unit: mm
+  # cm -> mm on the measurement side only. The template is already assumed to be mm.
+  unit_scale_factor: 10.0
+  axis_transform: none
+  origin_transform: neck reference point at y = 0, +y downward
+  # Nothing was edited in the template. Everything semantic is derived when the block is
+  # loaded, never stored beside it. The one thing declared rather than derived is the body
+  # the block is considered to fit, which lives in assets/base-blocks/catalog.yaml.
+  team_added_features:
+    - reference_profile
+  derived_semantics:
+    - panel_labels
+    - edge_roles
+    - landmark_roles
+    - seam_pairing
+    - grainline_orientation
+  # No pattern maker has approved a generated pattern against this block in this
+  # repository. RECONSTRUCTION.md lists that as outstanding, so this stays null rather
+  # than carrying an approval that never happened.
+  expert_approval: null
+
+# ---- frozen inputs -----------------------------------------------------------
+
+cases:
+  # The base block's own reference profile. Every difference is zero, so this case is the
+  # identity check: a transformation that cannot reproduce its own block is broken, and
+  # the reference profile is a different fixture from the base reference by construction.
+  - case_id: d2-case-001-identity
+    role: mandatory
+    measurements: fixtures/measurements/d2-case-001-identity.yaml
+  # A body larger than the block is declared to fit, with every difference inside the
+  # tested envelope.
+  - case_id: d2-case-002-larger
+    role: mandatory
+    measurements: fixtures/measurements/d2-case-002-larger.yaml
+  # A body smaller than the block is declared to fit, every difference running the
+  # opposite way, so a transformation that only works in one direction shows up.
+  - case_id: d2-case-003-smaller
+    role: mandatory
+    measurements: fixtures/measurements/d2-case-003-smaller.yaml
+  # Control case, not a mandatory one: it lies outside the declared supported domain and
+  # must be refused with a structured code. It is run so the failure policy is exercised
+  # and the failure stays in the log rather than being quietly dropped.
+  - case_id: d2-case-004-off-domain
+    role: control
+    measurements: fixtures/measurements/d2-case-004-off-domain.yaml
+
+garment: fixtures/garments/d2-basic-bodice.yaml
+
+# ---- trial counts -----------------------------------------------------------
+
+trials:
+  warmups: 5
+  memory_trials: 30
+  time_trials: 30
+  # `--smoke` runs this instead, to prove the harness end to end before the official run.
+  smoke:
+    cases: [d2-case-002-larger]
+    warmups: 1
+    memory_trials: 3
+    time_trials: 3
+
+# ---- thread control ---------------------------------------------------------
+#
+# Documented and applied to every trial, so a median is not a mix of thread counts.
+# Set before NumPy is imported.
+threading:
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  NUMEXPR_NUM_THREADS: "1"
+  VECLIB_MAXIMUM_THREADS: "1"
+
+# ---- Metric 5 allow-list ----------------------------------------------------
+#
+# The production modules that implement Design 2 and nothing else: loading the pinned base
+# block, deriving its semantic layer, and transforming it. Included: a module holds the
+# base-block or transformation logic that only the Design 2 route uses. Excluded: shared
+# schemas, the common validator, the common DXF exporter, the HTTP API, config, tests,
+# fixtures and this benchmark.
+#
+# Every one of these exists today only as a CPython 3.13 `.pyc` with no source, which
+# Radon cannot read - see RECONSTRUCTION.md and the recovery step in benchmark/README.md.
+# `maintainability_check.py` refuses to report a number until the source is back, rather
+# than silently scoring a shortened list.
+#
+# `role` is the inclusion rationale recorded against every row of the maintainability CSV.
+# Adding or removing a file here moves Metric 5 directly.
+maintainability:
+  files:
+    - path: backend/app/base_block/loader.py
+      role: Resolves the pinned catalog block and loads the reviewed template by hash.
+    - path: backend/app/base_block/derive.py
+      role: Derives the semantic layer - landmarks, edge roles and seams - from a template.
+    - path: backend/app/base_block/model.py
+      role: The resolved base-block model and its validation report.
+    - path: backend/app/base_block/measurements.py
+      role: Reference-profile loading and the garment-dimension definitions.
+    - path: backend/app/base_block/semantic_map.py
+      role: Maps source panel and edge labels onto the roles the transformation needs.
+    - path: backend/app/transformation/pipeline.py
+      role: Orchestrates differences, targets, solve, refit, balance and validation.
+    - path: backend/app/transformation/deltas.py
+      role: Measurement differences against the block's reference profile.
+    - path: backend/app/transformation/targets.py
+      role: Builds each landmark target from the influence map.
+    - path: backend/app/transformation/constraints.py
+      role: The tested envelope and the operator confirmation it requires.
+    - path: backend/app/transformation/deformation.py
+      role: The thin-plate-spline solve over the landmark targets.
+    - path: backend/app/transformation/curve_refit.py
+      role: Refits each deformed edge against its own parameterisation.
+    - path: backend/app/transformation/panels.py
+      role: Rebuilds the transformed panel document from the solved geometry.
+    - path: backend/app/transformation/seam_balance.py
+      role: Balances paired seam lengths after the solve.
+    - path: backend/app/validation/topology.py
+      role: The topology contract check every transformed document must satisfy.
+
+# ---- outputs ----------------------------------------------------------------
+
+outputs:
+  directory: results
+  trials_csv: design_2_trials.csv
+  case_summary_csv: design_2_case_summary.csv
+  failures_jsonl: design_2_failures.jsonl
+  environment_json: design_2_environment.json
+  base_block_record_json: design_2_base_block_record.json
+  config_manifest_json: design_2_config_manifest.json
+  maintainability_csv: design_2_maintainability.csv
+  final_metrics_json: design_2_final_metrics.json
