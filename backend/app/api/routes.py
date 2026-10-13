@@ -1,8 +1,14 @@
 """HTTP API. Structured errors only, never a raw stack trace.
 
-Transformation is gated twice: a request that leaves any required field MISSING,
-AMBIGUOUS or INVALID is refused with the blocking schema messages, and a target that
-falls outside the tested transformation envelope is refused or held for confirmation.
+One pipeline run serves every geometry endpoint. The stages are cheap enough - the whole
+run is a couple of seconds, almost all of it the two flattening solves - that a job queue
+would be more moving parts than the problem needs. Each response still carries the stage
+timings under `progress`, so a client can show where the time went, and a stage that
+refuses returns its reason with the stage that raised it.
+
+`ponytail:` if the mesh resolution is ever raised far enough for a run to exceed a few
+seconds, these endpoints need a job id, a poll route and cancellation. The `progress`
+payload is already shaped for it.
 """
 from __future__ import annotations
 
@@ -10,18 +16,11 @@ import io
 import json
 import zipfile
 
+import numpy as np
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, Response
 
-from ..base_block.loader import (
-    BaseBlockError,
-    catalog,
-    catalog_summary,
-    resolve_block,
-    validate_base_block,
-)
-from ..config import drafting_config, transformation_config
-from ..drafting.cutting import build_cutting_lines
+from ..config import drafting_config, reconstruction_config
 from ..drafting.ease import Settings
 from ..drafting.measurements import (
     MeasurementError,
@@ -29,25 +28,30 @@ from ..drafting.measurements import (
     parse_source,
     source_rows,
 )
+from ..drafting.semantics import default_confirmations
 from ..drafting.semantics import registry as semantics_registry
 from ..export.dxf import export_dxf
 from ..export.pdf import export_pdf
+from ..pipeline import (
+    STITCH_PAIRS,
+    UNMAPPED_FIELDS,
+    GenerationBlocked,
+    GenerationResult,
+    generate,
+    resolve_semantics,
+)
 from ..rendering.png import render_png
-from ..rendering.svg import COMPARISON_LAYERS, VIEW_LAYERS, RenderOptions, document_extent, render_svg
-from ..schemas.api import ExportRequest, SemanticsRequest, TransformRequest, RenderRequest, UploadRequest
+from ..rendering.svg import VIEW_LAYERS, RenderOptions, document_extent, render_svg
+from ..schemas.api import ExportRequest, GenerateRequest, PatternRequest, SemanticsRequest, UploadRequest
 from ..schemas.garmage import GarmageSet
 from ..serialization.garmageset import to_fixture_dict
-from ..transformation.deltas import compute_deltas, influence_map
-from ..transformation.pipeline import (
-    TransformationBlocked,
-    manifest,
-    resolve_semantics,
-    transform,
-)
 
 router = APIRouter(prefix="/api")
 
 BLOCKED_STATUS = 409
+
+
+# ---- shared plumbing -------------------------------------------------------
 
 
 def _settings(payload) -> Settings:
@@ -57,7 +61,8 @@ def _settings(payload) -> Settings:
 def _semantics(req) -> tuple[tuple, JSONResponse | None]:
     """Never returns None: an unresolved import becomes a structured 422, not a crash."""
     try:
-        return resolve_semantics(req.yamlText, req.filename, req.confirmations, req.corrections), None
+        return resolve_semantics(req.yamlText, req.filename, req.confirmations,
+                                 req.corrections), None
     except MeasurementError as exc:
         return (None, None), JSONResponse(
             status_code=422,
@@ -66,69 +71,159 @@ def _semantics(req) -> tuple[tuple, JSONResponse | None]:
         )
 
 
-def _blocked(code: str, message: str, details: list[dict], extra: dict | None = None) -> JSONResponse:
-    content = {"error": {"code": code, "message": message, "details": details}}
-    content.update(extra or {})
-    return JSONResponse(status_code=BLOCKED_STATUS, content=content)
-
-
-def _transform(req):
-    """Resolve, transform, serialise. Returns (profile, resolution, settings, bundle, error)."""
-    (profile, resolution), res_json = _semantics(req)
-    if res_json is not None:
-        return None, None, None, None, res_json
-    settings = _settings(req.settings)
+def _run(req) -> tuple[GenerationResult | None, JSONResponse | None]:
+    (profile, resolution), error = _semantics(req)
+    if error is not None:
+        return None, error
     try:
-        result = transform(resolution, settings)
-    except TransformationBlocked as exc:
-        return None, None, None, None, _blocked(
-            exc.code, exc.message, exc.details,
-            {"semantics": resolution.as_dict()} if exc.code == "semantics_unresolved" else None,
-        )
-    except BaseBlockError as exc:
-        return None, None, None, None, JSONResponse(
-            status_code=500,
-            content={"error": {"code": "base_block_unavailable",
-                               "message": "The versioned base block could not be loaded.",
-                               "details": exc.errors}},
-        )
-    payload = to_fixture_dict(result.document)
-    GarmageSet.model_validate(payload)  # never emit output the schema rejects
-    return profile, resolution, settings, (result, payload), None
+        return generate(resolution, profile, _settings(req.settings)), None
+    except GenerationBlocked as exc:
+        content = {
+            "error": {"code": exc.code, "message": exc.message, "details": exc.details},
+            "stage": exc.stage,
+        }
+        if exc.code == "semantics_unresolved":
+            content["semantics"] = resolution.as_dict()
+        return None, JSONResponse(status_code=BLOCKED_STATUS, content=content)
+
+
+def _round(array, digits: int = 2) -> list:
+    return np.round(np.asarray(array, dtype=float), digits).tolist()
+
+
+def _mesh_payload(surface) -> dict:
+    """A ring-stack surface as the viewer wants it: flat vertices and triangles."""
+    verts = surface.vertices().reshape(-1, 3)
+    return {
+        "label": surface.label,
+        "columns": surface.columns,
+        "rows": len(surface.ys),
+        "vertices": _round(verts, 2),
+        "faces": [[int(v) for v in f] for f in surface.faces()],
+        "levelRows": surface.level_rows,
+        "rings": surface.as_dict()["rings"],
+    }
+
+
+def _seam_paths(result: GenerationResult) -> list[dict]:
+    """The seam network as 3D polylines, for the surface viewer."""
+    out = []
+    for panel in result.panels:
+        for role, ids in panel.panel.semantic_boundaries.items():
+            out.append({
+                "panel": panel.panel.key,
+                "role": role,
+                "points": _round(panel.panel.vertices_3d[ids], 2),
+            })
+    return out
 
 
 def _panel_summary(doc) -> list[dict]:
     return [
         {
-            "id": p.ensure_id(), "key": p.key, "label": p.label, "center": p.center.as_triple(),
+            "id": p.ensure_id(), "key": p.key, "label": p.label,
+            "center": (p.center.as_triple() if p.center else [0.0, 0.0, 0.0]),
             "edges": [
                 {"id": e.ensure_id(), "label": e.label, "role": e.role,
-                 "lengthMm": round(e.length_mm, 4)}
+                 "lengthMm": round(e.length_mm, 4),
+                 "allowanceMm": e.seam_allowance_mm,
+                 "pairedEdgeId": e.paired_edge_id}
                 for e in p.edges
             ],
-            "darts": [{"id": d.id, "intakeMm": round(d.intake_mm, 4)} for d in p.darts],
+            "darts": [],
             "landmarks": {role: point.as_triple() for role, point in p.landmarks.items()},
         }
         for p in doc.panels
     ]
 
 
-def _preview(result, dark: bool = False) -> dict:
-    """One render that carries both blocks, so the comparison cannot drift apart."""
+def _preview(result: GenerationResult, dark: bool = False) -> dict:
     options = RenderOptions(dark=dark)
-    base = result.block.document
     return {
-        "svg": render_svg(result.document, result.cutting, options, base=base),
-        "extent": list(document_extent(result.document, options)),
-        "layers": list(VIEW_LAYERS),
-        "comparisonLayers": list(COMPARISON_LAYERS),
+        "svg": render_svg(result.document, result.cutting, options),
+        "extent": [float(v) for v in document_extent(result.document, options)],
+        "layers": [layer for layer in VIEW_LAYERS
+                   if layer not in {"base", "displacement", "heatmap"}],
+        "comparisonLayers": [],
         "panels": _panel_summary(result.document),
-        "basePanels": _panel_summary(base),
-        "displacements": result.diagnostics()["landmarkTargets"],
+        "basePanels": [],
+        "displacements": [],
     }
 
 
-# ---- step 1: syntax only ---------------------------------------------------
+def _result_payload(result: GenerationResult, req) -> dict:
+    payload = to_fixture_dict(result.document)
+    GarmageSet.model_validate(payload)  # never emit output the schema rejects
+    out = {
+        "pattern": payload,
+        "trace": result.manifest(req.filename),
+        "diagnostics": result.flattening_diagnostics(),
+        "validation": result.report.as_dict(),
+        "preview": _preview(result, req.dark),
+        "heatMaps": result.heat_maps(),
+        "settings": result.settings.as_dict(),
+        "assumptions": result.assumptions.as_list(),
+        "progress": result.progress,
+    }
+    if getattr(req, "include_mesh", False):
+        out["flattenedMesh"] = result.flattened_mesh()
+    if getattr(req, "include_surfaces", False):
+        out["crossSections"] = result.cross_sections_json()
+        out["surfaceStages"] = {
+            "proxy": _mesh_payload(result.proxy),
+            "garment": _mesh_payload(result.garment),
+            "seamNetwork": result.network.as_dict(),
+            "seamPaths": _seam_paths(result),
+            "surfaceSeamLengths": result.surface_seams,
+            "panels": [
+                {
+                    **p.panel.as_dict(),
+                    "vertices": _round(p.panel.vertices_3d, 2),
+                    "faces": [[int(v) for v in f] for f in p.panel.faces],
+                    "boundary": [int(i) for i in p.panel.boundary()],
+                    "semanticBoundaries": {
+                        role: [int(i) for i in ids]
+                        for role, ids in p.panel.semantic_boundaries.items()
+                    },
+                }
+                for p in result.panels
+            ],
+        }
+    return out
+
+
+def _production_export_block(result: GenerationResult) -> JSONResponse | None:
+    report = result.report.as_dict()
+    if report["summary"]["criticalFailures"] == 0:
+        return None
+    failed = [
+        check for check in report["checks"]
+        if check["status"] == "fail" and check["severity"] == "critical"
+    ]
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": {
+                "code": "validation_failed",
+                "message": "Production export is blocked by critical geometry checks.",
+                "details": [
+                    {
+                        "field": check["id"],
+                        "code": "CRITICAL_GEOMETRY_CHECK_FAILED",
+                        "message": check["message"],
+                        "suggestedAction": check["suggestedAction"],
+                    }
+                    for check in failed
+                ],
+            },
+            "stage": "validation",
+            "validation": report,
+        },
+    )
+
+
+# ---- step 1: the measurements ---------------------------------------------
+
 
 @router.post("/measurements/validate")
 def validate_measurements(req: UploadRequest):
@@ -146,20 +241,22 @@ def validate_measurements(req: UploadRequest):
         "filename": req.filename,
         "unit": profile.unit,
         "rows": source_rows(profile),
+        "warnings": [],
         "dictionary": dictionary_summary(),
     }
 
 
 @router.post("/measurements/semantics")
 def resolve_field_semantics(req: SemanticsRequest):
-    """Semantics resolution, normalization, consistency and confirmation."""
-    (profile, resolution), res_json = _semantics(req)
-    if res_json is not None:
-        return res_json
+    """Semantics resolution, normalisation, consistency and confirmation."""
+    (profile, resolution), error = _semantics(req)
+    if error is not None:
+        return error
     return {
         "filename": req.filename,
         "source": resolution.as_dict(),
         "registry": semantics_registry().as_dict(),
+        "defaultConfirmations": default_confirmations(),
         "draftingMeasurements": (
             resolution.measurements.model_dump() if resolution.measurements else None
         ),
@@ -174,9 +271,9 @@ def semantics_schema():
 @router.post("/measurements/report")
 def measurements_report(req: SemanticsRequest):
     """Validation report for the definitions screen, before any geometry exists."""
-    (profile, resolution), res_json = _semantics(req)
-    if res_json is not None:
-        return res_json
+    (profile, resolution), error = _semantics(req)
+    if error is not None:
+        return error
     return Response(
         content=json.dumps(
             {
@@ -190,6 +287,7 @@ def measurements_report(req: SemanticsRequest):
                 "assumptions": resolution.assumptions,
                 "warnings": resolution.warnings,
                 "blocking": resolution.blocking,
+                "unmapped_fields": UNMAPPED_FIELDS,
             },
             indent=2,
         ).encode("utf-8"),
@@ -198,147 +296,105 @@ def measurements_report(req: SemanticsRequest):
     )
 
 
-# ---- the base blocks -------------------------------------------------------
-
-def _block_or_error(block_id: str | None):
-    try:
-        return resolve_block(block_id), None
-    except BaseBlockError as exc:
-        return None, JSONResponse(
-            status_code=404 if any(e["code"] == "unknown_base_block" for e in exc.errors) else 500,
-            content={"error": {"code": "base_block_unavailable",
-                               "message": "The base block could not be loaded.",
-                               "details": exc.errors}},
-        )
+# ---- reconstruction --------------------------------------------------------
 
 
-@router.get("/base-blocks")
-def list_base_blocks():
-    """The blocks on offer, so the operator can choose one before transforming."""
+@router.post("/reconstruction/cross-sections")
+def reconstruct_cross_sections(req: GenerateRequest):
+    """Anatomical levels and the solved sections, with every residual."""
+    result, error = _run(req)
+    if error is not None:
+        return error
     return {
-        "catalogVersion": catalog()["version"],
-        "default": catalog()["default"],
-        "reference": catalog().get("reference", {}),
-        "blocks": catalog_summary(),
-        "templateSelection": {
-            "supported": True,
-            "idFormat": "template:<file>.json",
-            "note": "Any template in the library can be loaded this way. It has not been "
-                    "reviewed as a base block and says so.",
-        },
+        **result.cross_sections_json(),
+        "assumptions": result.assumptions.as_list(),
+        "progress": result.progress,
     }
 
 
-@router.get("/base-blocks/{block_id:path}")
-def get_base_block(block_id: str):
-    """One block in full: semantics, derived maps, measured dimensions and a preview."""
-    block, error = _block_or_error(block_id)
+@router.post("/reconstruction/proxy-surface")
+def reconstruct_proxy_surface(req: GenerateRequest):
+    """The lofted, smoothed proxy torso."""
+    result, error = _run(req)
     if error is not None:
         return error
-    report = validate_base_block(block)
-    cutting = build_cutting_lines(block.document, Settings())
     return {
-        **block.summary(),
-        "maps": {
-            "landmarks": block.landmark_map(),
-            "edges": block.edge_map(),
-            "seams": block.seam_map(),
-            "darts": block.dart_map(),
-            "grainlines": block.grainline_map(),
-        },
-        "previewSvg": render_svg(block.document, cutting, RenderOptions()),
-        "panelSummary": _panel_summary(block.document),
-        "validation": report.as_dict(),
-        "validationStatus": report.status,
-        "provenance": block.provenance,
-        "influenceMapVersion": influence_map()["version"],
+        "mesh": _mesh_payload(result.proxy),
+        "smoothing": result.smoothing,
+        "quality": {p.panel.key: p.quality for p in result.panels},
+        "assumptions": result.assumptions.as_list(),
+        "progress": result.progress,
     }
 
 
-@router.post("/base-blocks/{block_id:path}/validate")
-def validate_base_block_route(block_id: str):
-    """The same geometry validator that runs on transformed patterns."""
-    block, error = _block_or_error(block_id)
+@router.post("/garment/surface")
+def garment_surface(req: GenerateRequest):
+    """The ease-adjusted garment surface and the circumferences it achieved."""
+    result, error = _run(req)
     if error is not None:
         return error
-    report = validate_base_block(block)
-    return {"ok": report.status == "pass", "blockId": block.id, **report.as_dict()}
-
-
-@router.post("/base-block/deltas")
-def base_block_deltas(req: TransformRequest):
-    """Target-versus-base differences and the envelope, before any geometry is built."""
-    (profile, resolution), res_json = _semantics(req)
-    if res_json is not None:
-        return res_json
-    settings = _settings(req.settings)
-    block, error = _block_or_error(settings.base_block_id)
-    if error is not None:
-        return error
-    if resolution.measurements is None:
-        return _blocked(
-            "semantics_unresolved",
-            "Measurement differences cannot be computed until every required field has a "
-            "confirmed definition.",
-            resolution.blocking,
-            {"semantics": resolution.as_dict()},
-        )
-
-    from ..drafting.ease import resolve_ease
-    from ..transformation.constraints import evaluate_envelope
-
-    ease = resolve_ease(settings)
-    reference_ease = resolve_ease(Settings(ease_preset=block.reference_ease_preset))
-    deltas = compute_deltas(
-        resolution.measurements, block.reference_measurements, ease,
-        {"bust_mm": reference_ease.bust_mm, "waist_mm": reference_ease.waist_mm,
-         "hip_mm": reference_ease.hip_mm},
-    )
-    envelope = evaluate_envelope(deltas, confirmed=settings.confirm_envelope)
     return {
-        "baseBlock": {"id": block.id, "label": block.label, "version": block.version,
-                      "reviewed": block.reviewed},
-        "referenceProfile": block.reference_profile.as_dict(),
-        "referenceEasePreset": block.reference_ease_preset,
-        "baseMeasurementsMm": block.reference_measurements,
-        "garmentDimensionsMm": block.garment_dimensions,
-        "measurementDefinitions": block.measurement_definitions,
-        "targetEaseMm": {"bust_mm": ease.bust_mm, "waist_mm": ease.waist_mm,
-                         "hip_mm": ease.hip_mm, "preset": ease.preset},
-        "deltas": [d.as_dict() for d in sorted(deltas.values(), key=lambda d: d.name)],
-        "envelope": envelope.as_dict(),
-        "influenceMap": influence_map(),
+        "mesh": _mesh_payload(result.garment),
+        "proxyMesh": _mesh_payload(result.proxy),
+        "ease": result.ease.as_dict(),
+        "diagnostics": result.garment_diagnostics,
+        "progress": result.progress,
     }
 
 
-# ---- transformation --------------------------------------------------------
-
-@router.post("/patterns/transform")
-def transform_pattern(req: TransformRequest):
-    profile, resolution, settings, bundle, error = _transform(req)
+@router.post("/garment/segment")
+def garment_segment(req: GenerateRequest):
+    """The seam network and the segmented panels."""
+    result, error = _run(req)
     if error is not None:
         return error
-    result, payload = bundle
     return {
-        "pattern": payload,
-        "trace": manifest(result, profile, req.filename),
-        "diagnostics": result.diagnostics(),
-        "validation": result.report.as_dict(),
-        "preview": _preview(result),
-        "settings": result.settings.as_dict(),
+        "network": result.network.as_dict(),
+        "seamPaths": _seam_paths(result),
+        "surfaceSeamLengths": result.surface_seams,
+        "panels": [
+            {
+                **p.panel.as_dict(),
+                "vertices": _round(p.panel.vertices_3d, 2),
+                "faces": [[int(v) for v in f] for f in p.panel.faces],
+                "boundary": [int(i) for i in p.panel.boundary()],
+                "semanticBoundaries": {
+                    role: [int(i) for i in ids]
+                    for role, ids in p.panel.semantic_boundaries.items()
+                },
+            }
+            for p in result.panels
+        ],
+        "stitchPairs": [
+            {"a": {"panel": a[0], "role": a[1]}, "b": {"panel": b[0], "role": b[1]}}
+            for a, b in STITCH_PAIRS
+        ],
+        "progress": result.progress,
     }
+
+
+# ---- flattening and the pattern -------------------------------------------
+
+
+@router.post("/patterns/flatten")
+def flatten_pattern(req: GenerateRequest):
+    """The whole pipeline: pattern, manifest, diagnostics, validation and preview."""
+    result, error = _run(req)
+    if error is not None:
+        return error
+    return _result_payload(result, req)
 
 
 @router.post("/patterns/render")
-def render(req: TransformRequest):
-    _profile, _resolution, _settings, bundle, error = _transform(req)
+def render(req: GenerateRequest):
+    result, error = _run(req)
     if error is not None:
         return error
-    return _preview(bundle[0], dark=req.dark)
+    return {**_preview(result, req.dark), "heatMaps": result.heat_maps()}
 
 
 @router.post("/patterns/validate")
-def validate_pattern(req: RenderRequest):
+def validate_pattern(req: PatternRequest):
     """Schema and closure checks on a supplied GarmageSet document."""
     try:
         model = GarmageSet.model_validate(req.pattern)
@@ -399,67 +455,107 @@ def _validate_payload(model: GarmageSet) -> list[dict]:
 
 # ---- exports ---------------------------------------------------------------
 
+
 @router.post("/patterns/export/pdf")
 def export_pdf_route(req: ExportRequest):
-    _p, _r, settings, bundle, error = _transform(req)
+    result, error = _run(req)
     if error is not None:
         return error
-    result, _payload = bundle
-    data = export_pdf(result.document, result.cutting, settings.paper_size,
-                      settings.paper_orientation)
+    blocked = _production_export_block(result)
+    if blocked is not None:
+        return blocked
+    data = export_pdf(result.document, result.cutting, result.settings.paper_size,
+                      result.settings.paper_orientation)
     return Response(content=data, media_type="application/pdf",
                     headers={"Content-Disposition": 'attachment; filename="pattern-a0.pdf"'})
 
 
 @router.post("/patterns/export/dxf")
 def export_dxf_route(req: ExportRequest):
-    _p, _r, _settings, bundle, error = _transform(req)
+    result, error = _run(req)
     if error is not None:
         return error
-    data = export_dxf(bundle[0].document, bundle[0].cutting)
+    blocked = _production_export_block(result)
+    if blocked is not None:
+        return blocked
+    data = export_dxf(result.document, result.cutting)
     return Response(content=data, media_type="application/dxf",
                     headers={"Content-Disposition": 'attachment; filename="pattern.dxf"'})
 
 
 @router.post("/patterns/export/svg")
 def export_svg_route(req: ExportRequest):
-    _p, _r, _settings, bundle, error = _transform(req)
+    result, error = _run(req)
     if error is not None:
         return error
-    result = bundle[0]
-    data = render_svg(result.document, result.cutting, RenderOptions(),
-                      base=result.block.document).encode("utf-8")
+    blocked = _production_export_block(result)
+    if blocked is not None:
+        return blocked
+    data = render_svg(result.document, result.cutting, RenderOptions()).encode("utf-8")
     return Response(content=data, media_type="image/svg+xml",
-                    headers={"Content-Disposition": 'attachment; filename="base-vs-target-preview.svg"'})
+                    headers={"Content-Disposition": 'attachment; filename="pattern-preview.svg"'})
+
+
+# The debugging artefacts, by name. They never replace the required outputs.
+DEBUG_ARTIFACTS = (
+    "cross-sections.json", "proxy-mesh.obj", "garment-mesh.obj", "segmented-panels.obj",
+    "flattened-mesh.json", "flattening-diagnostics.json",
+)
+
+
+@router.post("/patterns/debug/{artifact}")
+def export_debug(artifact: str, req: ExportRequest):
+    if artifact not in DEBUG_ARTIFACTS:
+        return JSONResponse(
+            status_code=404,
+            content={"error": {"code": "unknown_artifact",
+                               "message": f"No debugging artefact named {artifact}.",
+                               "details": [{"field": "artifact",
+                                            "message": f"One of {', '.join(DEBUG_ARTIFACTS)}."}]}},
+        )
+    result, error = _run(req)
+    if error is not None:
+        return error
+    data = _debug_files(result)[artifact]
+    media = "application/json" if artifact.endswith(".json") else "text/plain"
+    return Response(content=data, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{artifact}"'})
+
+
+def _debug_files(result: GenerationResult) -> dict[str, bytes]:
+    return {
+        "cross-sections.json": _json_bytes(result.cross_sections_json()),
+        "proxy-mesh.obj": result.proxy.obj(),
+        "garment-mesh.obj": result.garment.obj(),
+        "segmented-panels.obj": b"".join(p.panel.obj() for p in result.panels),
+        "flattened-mesh.json": _json_bytes(result.flattened_mesh()),
+        "flattening-diagnostics.json": _json_bytes(result.flattening_diagnostics()),
+    }
 
 
 @router.post("/patterns/export/bundle")
 def export_bundle(req: ExportRequest):
-    profile, _resolution, settings, bundle, error = _transform(req)
+    result, error = _run(req)
     if error is not None:
         return error
-    result, payload = bundle
-    base_cutting = build_cutting_lines(result.block.document, settings)
+    blocked = _production_export_block(result)
+    if blocked is not None:
+        return blocked
+    payload = to_fixture_dict(result.document)
+    GarmageSet.model_validate(payload)
     files = {
         "pattern.json": _json_bytes(payload),
-        "generation-manifest.json": _json_bytes(manifest(result, profile, req.filename)),
-        "transformation-diagnostics.json": _json_bytes(result.diagnostics()),
+        "generation-manifest.json": _json_bytes(result.manifest(req.filename)),
         "validation-report.json": _json_bytes(result.report.as_dict()),
-        "base-vs-target-preview.png": render_png(result.document, result.cutting,
-                                                 base=result.block.document),
-        "base-vs-target-preview.svg": render_svg(result.document, result.cutting,
-                                                 RenderOptions(),
-                                                 base=result.block.document).encode("utf-8"),
-        "base-block.json": _json_bytes(result.block.summary()),
-        "base-block-landmark-map.json": _json_bytes(result.block.landmark_map()),
-        "base-block-edge-map.json": _json_bytes(result.block.edge_map()),
-        "base-block-seam-map.json": _json_bytes(result.block.seam_map()),
-        "base-block-dart-map.json": _json_bytes(result.block.dart_map()),
-        "base-block-grainline-map.json": _json_bytes(result.block.grainline_map()),
-        "base-block-preview.svg": render_svg(result.block.document, base_cutting).encode("utf-8"),
-        "pattern-a0.pdf": export_pdf(result.document, result.cutting, settings.paper_size,
-                                     settings.paper_orientation),
+        "flattening-diagnostics.json": _json_bytes(result.flattening_diagnostics()),
+        "pattern-preview.png": render_png(result.document, result.cutting),
+        "pattern-preview.svg": render_svg(result.document, result.cutting,
+                                          RenderOptions()).encode("utf-8"),
+        "pattern-a0.pdf": export_pdf(result.document, result.cutting,
+                                     result.settings.paper_size,
+                                     result.settings.paper_orientation),
         "pattern.dxf": export_dxf(result.document, result.cutting),
+        **{f"debug/{name}": data for name, data in _debug_files(result).items()},
     }
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -476,27 +572,26 @@ def _json_bytes(data: dict) -> bytes:
 @router.get("/config")
 def get_config():
     cfg = drafting_config()
-    tcfg = transformation_config()
+    rcfg = reconstruction_config()
     reg = semantics_registry()
     return {
-        "easePresets": cfg["ease_presets"],
-        "defaultEasePreset": cfg["default_ease_preset"],
+        "version": rcfg["version"],
+        "crossSection": rcfg["cross_section"],
+        "levels": rcfg["levels"],
+        "mesh": rcfg["mesh"],
+        "garment": rcfg["garment"],
+        "seams": rcfg["seams"],
+        "flattening": rcfg["flattening"],
+        "boundaryRefit": rcfg["boundary_refit"],
+        "easePresets": rcfg["garment"]["ease_presets"],
+        "defaultEasePreset": rcfg["garment"]["default_ease_preset"],
         "seamAllowances": cfg["seam_allowance_mm"],
         "paper": cfg["paper"],
-        "tolerances": cfg["tolerances"],
+        "tolerances": {**cfg["tolerances"], **rcfg["tolerances"]},
         "viewLayers": list(VIEW_LAYERS),
-        "comparisonLayers": list(COMPARISON_LAYERS),
         "fixtureDefaults": cfg["fixture_defaults"],
-        "transformation": {
-            "version": tcfg["version"],
-            "method": tcfg["solver"]["method"],
-            "objective": tcfg["objective"],
-            "solver": tcfg["solver"],
-            "curveRefit": tcfg["curve_refit"],
-            "seamBalance": tcfg["seam_balance"],
-            "envelope": tcfg["envelope"],
-            "influenceMapVersion": tcfg["influence"]["version"],
-        },
+        "debugArtifacts": list(DEBUG_ARTIFACTS),
+        "unmappedFields": UNMAPPED_FIELDS,
         "measurementSchema": {
             "schemaVersion": reg.schema_version,
             "definitionVersion": reg.definition_version,

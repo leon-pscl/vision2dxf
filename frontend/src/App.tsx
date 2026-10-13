@@ -5,28 +5,42 @@ import { Button, Callout, Spinner } from './components/ui'
 import { UploadStep } from './upload/UploadStep'
 import { DefinitionsStep } from './semantics/DefinitionsStep'
 import { MeasurementReview } from './measurement-review/MeasurementReview'
-import { BaseBlockStep } from './base-block/BaseBlockStep'
 import { ConfigureStep } from './configure/ConfigureStep'
 import { GenerationStep } from './generate/GenerationStep'
-import { ComparisonViewer } from './comparison-viewer/ComparisonViewer'
+import { DistortionHeatMap } from './flattening-view/DistortionHeatMap'
+import { PatternViewer } from './pattern-viewer/PatternViewer'
+import { SurfaceReview } from './surface-view/SurfaceReview'
 import { ValidationView } from './validation-view/ValidationView'
 import { ExportView } from './export-view/ExportView'
 import { STEPS, firstIncompleteStep, stepIndex, type StepId } from './steps'
-import type { AppConfig, Review, Settings, TransformResponse } from './types'
+import type { AppConfig, GenerationResponse, Review, Settings } from './types'
 
 const DEFAULT_SETTINGS: Settings = {
-  garment_type: 'basic_bodice',
-  base_block_id: null,
+  garment_type: 'basic_torso',
+  section_model: 'superellipse',
+  section_exponent: null,
+  cross_section_resolution: null,
+  longitudinal_segments: null,
   ease_preset: 'fitted',
   bust_ease_mm: null,
   waist_ease_mm: null,
   hip_ease_mm: null,
+  armhole_ease_mm: null,
+  seam_preset: 'basic_torso_v1',
+  front_neck_drop_mm: null,
+  back_neck_drop_mm: null,
+  flattening_method: 'lscm_arap',
+  w_distortion: null,
+  w_boundary: null,
+  w_seam: null,
+  w_grain: null,
+  w_flip: null,
   seam_allowances: {},
   cutting_join: null,
   paper_size: null,
   paper_orientation: null,
-  confirm_envelope: false,
   unit: 'cm',
+  confirm_units: false,
 }
 
 const EMPTY_PAYLOAD: GenerationPayload = {
@@ -41,9 +55,8 @@ export default function App() {
   const [input, setInput] = useState<GenerationPayload>(EMPTY_PAYLOAD)
   const [review, setReview] = useState<Review | null>(null)
   const [semanticsReady, setSemanticsReady] = useState(false)
-  const [blockReady, setBlockReady] = useState(false)
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
-  const [result, setResult] = useState<TransformResponse | null>(null)
+  const [result, setResult] = useState<GenerationResponse | null>(null)
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -57,18 +70,26 @@ export default function App() {
   }, [theme])
 
   useEffect(() => {
-    api.config().then(setConfig).catch(() => undefined)
+    api.config()
+      .then(setConfig)
+      .catch((e: unknown) => {
+        setError(e instanceof RequestError ? e.message : 'Could not load reconstruction configuration.')
+      })
   }, [])
+
+  const invalidate = () => setResult(null)
 
   const generate = useCallback(async () => {
     setBusy(true)
     setError(null)
     try {
-      setResult(await api.transform(input, settings))
-      setStep(stepIndex('compare'))
+      const generated = await api.generate(input, settings)
+      setResult(generated)
+      setStep(stepIndex('cross-sections'))
     } catch (e) {
-      setError(e instanceof RequestError ? e.message : 'Transformation failed')
-      setStep(stepIndex('base'))
+      setError(e instanceof RequestError
+        ? `${e.message}${e.details.length ? `: ${e.details.map((d) => d.message).join('; ')}` : ''}`
+        : 'Surface reconstruction failed.')
     } finally {
       setBusy(false)
     }
@@ -77,23 +98,22 @@ export default function App() {
   const ready = useMemo(
     () =>
       ({
-        upload: input.yamlText.trim().length > 0,
+        upload: input.yamlText.trim().length > 0 && Boolean(review),
         definitions: semanticsReady,
-        review: semanticsReady,
-        base: semanticsReady,
-        configure: semanticsReady && blockReady,
-        generate: semanticsReady && blockReady,
-        compare: Boolean(result),
+        review: semanticsReady && Boolean(review),
+        configure: semanticsReady,
+        generate: semanticsReady && settings.confirm_units,
+        'cross-sections': Boolean(result?.crossSections),
+        surface: Boolean(result?.surfaceStages),
+        flattening: Boolean(result),
+        pattern: Boolean(result),
         validation: Boolean(result),
         export: Boolean(result),
       }) as Record<StepId, boolean>,
-    [input, semanticsReady, blockReady, result],
+    [input.yamlText, review, result, semanticsReady, settings.confirm_units],
   )
 
   const furthest = firstIncompleteStep(ready)
-  const invalidate = () => {
-    setResult(null)
-  }
 
   return (
     <div className="app">
@@ -101,8 +121,8 @@ export default function App() {
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />
           <div>
-            <strong>Base-block transformation</strong>
-            <small>a validated pattern block, deformed to measured body data</small>
+            <strong>Anthropometric surface reconstruction</strong>
+            <small>Measured proxy torso · seam segmentation · computational flattening</small>
           </div>
         </div>
         <div className="row">
@@ -120,22 +140,27 @@ export default function App() {
       <Stepper current={step} reachable={(i) => i <= furthest || i === step} onSelect={setStep} />
 
       <main>
-        {error ? (
-          <Callout tone="error" title="Request failed">
-            {error}
-          </Callout>
-        ) : null}
+        {error ? <Callout tone="error" title="Request failed">{error}</Callout> : null}
 
         {step === stepIndex('upload') ? (
           <UploadStep
             yaml={input.yamlText}
             filename={input.filename}
-            setYaml={(yamlText) => setInput((prev) => ({ ...EMPTY_PAYLOAD, yamlText, filename: prev.filename }))}
-            setFilename={(filename) => setInput((prev) => ({ ...EMPTY_PAYLOAD, filename, yamlText: prev.yamlText }))}
-            onUploaded={(r) => {
-              setReview(r)
+            setYaml={(yamlText) => {
+              setInput((prev) => ({ ...EMPTY_PAYLOAD, yamlText, filename: prev.filename }))
+              setReview(null)
               setSemanticsReady(false)
-              setBlockReady(false)
+              invalidate()
+            }}
+            setFilename={(filename) => {
+              setInput((prev) => ({ ...EMPTY_PAYLOAD, filename, yamlText: prev.yamlText }))
+              setReview(null)
+              setSemanticsReady(false)
+              invalidate()
+            }}
+            onUploaded={(nextReview) => {
+              setReview(nextReview)
+              setSemanticsReady(false)
               invalidate()
               setStep(stepIndex('definitions'))
             }}
@@ -165,86 +190,90 @@ export default function App() {
                 invalidate()
               }}
             />
-          ) : (
-            <p>Import a YAML file first.</p>
-          )
-        ) : null}
-
-        {step === stepIndex('base') ? (
-          <BaseBlockStep
-            input={input}
-            settings={settings}
-            onChange={(next) => {
-              setSettings(next)
-              invalidate()
-            }}
-            onReady={setBlockReady}
-          />
+          ) : <p>Upload a measurement file first.</p>
         ) : null}
 
         {step === stepIndex('configure') ? (
           <ConfigureStep
             settings={settings}
+            config={config}
             onChange={(next) => {
               setSettings(next)
               invalidate()
             }}
-            config={config}
-            assumptions={result?.trace.assumptions ?? []}
           />
         ) : null}
 
         {step === stepIndex('generate') ? (
           <div className="stack">
-            <h2>Transform the base block</h2>
+            <h2>Generate from the reconstructed surface</h2>
             <p className="muted">
-              The block is loaded, validated, and deformed onto the target landmarks with a thin-plate
-              spline. Nothing is redrafted from a formula: panel count, boundary order, edge roles,
-              identifiers, stitches and grain direction all survive the transformation.
+              The pipeline solves anatomical cross-sections, lofts and eases a proxy torso,
+              segments it along the fixed seam network, then flattens each triangulated panel.
+              It does not use a two-dimensional master block or drafting-formula sequence.
             </p>
-            <Button variant="primary" onClick={() => void generate()} disabled={busy || !ready.generate}>
-              {busy ? 'Transforming…' : result ? 'Transform again' : 'Transform pattern'}
-            </Button>
             {!semanticsReady ? (
-              <Callout tone="warn">
-                Every required field needs a confirmed definition before a transformation is allowed.
-              </Callout>
+              <Callout tone="warn">Resolve and confirm every required measurement definition before generating.</Callout>
             ) : null}
-            {semanticsReady && !blockReady ? (
-              <Callout tone="warn">
-                Pick a base block whose validation passes, and confirm the transformation limits if the
-                target sits outside the tested range.
-              </Callout>
+            {!settings.confirm_units ? (
+              <Callout tone="warn">Confirm the measurement units in Configure before generating.</Callout>
             ) : null}
-            {busy ? <Spinner label="Solving the deformation, balancing seams, running geometry checks…" /> : null}
+            <Button variant="primary" onClick={() => void generate()} disabled={busy || !ready.generate}>
+              {busy ? 'Reconstructing and flattening…' : result ? 'Regenerate surface pattern' : 'Generate pattern'}
+            </Button>
+            {busy ? <Spinner label="Solving sections, reconstructing surfaces, segmenting seams, flattening panels, and validating geometry…" /> : null}
             {result ? <GenerationStep result={result} /> : null}
           </div>
         ) : null}
 
-        {step === stepIndex('compare') && result ? (
-          <ComparisonViewer preview={result.preview} diagnostics={result.diagnostics} />
+        {step === stepIndex('cross-sections') && result ? (
+          <SurfaceReview result={result} view="sections" />
         ) : null}
-        {step === stepIndex('validation') && result ? <ValidationView report={result.validation} /> : null}
+
+        {step === stepIndex('surface') && result ? (
+          <SurfaceReview result={result} view="surfaces" />
+        ) : null}
+
+        {step === stepIndex('flattening') && result ? (
+          <div className="stack">
+            <GenerationStep result={result} />
+            <DistortionHeatMap result={result} />
+          </div>
+        ) : null}
+
+        {step === stepIndex('pattern') && result ? (
+          <div className="stack">
+            <h2>Flattened two-dimensional panels</h2>
+            <p className="muted">
+              Pattern geometry is reconstructed from the triangulated garment surface.
+              Drag to pan, scroll to zoom, and use the ruler to inspect lengths in millimetres.
+            </p>
+            <PatternViewer preview={result.preview} />
+          </div>
+        ) : null}
+
+        {step === stepIndex('validation') && result ? (
+          <ValidationView report={result.validation} />
+        ) : null}
+
         {step === stepIndex('export') && result ? (
           <ExportView result={result} input={input} settings={settings} />
         ) : null}
       </main>
 
       <footer className="app-foot">
-        <div className="row">
-          <Button disabled={step === 0} onClick={() => setStep((s) => Math.max(0, s - 1))}>
-            Back
-          </Button>
-          <Button
-            variant="primary"
-            disabled={step >= STEPS.length - 1 || !ready[STEPS[step + 1]?.id ?? 'export']}
-            onClick={() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}
-          >
-            Next
-          </Button>
-        </div>
+        <Button variant="ghost" disabled={step === 0} onClick={() => setStep((current) => Math.max(0, current - 1))}>
+          Previous
+        </Button>
+        <Button
+          variant="primary"
+          disabled={step >= STEPS.length - 1 || !ready[STEPS[step + 1]?.id ?? 'export']}
+          onClick={() => setStep((current) => Math.min(STEPS.length - 1, current + 1))}
+        >
+          Next
+        </Button>
         <small className="muted">
-          Geometry in millimetres · endpoint tolerance 0.1 mm · the base block is deformed, never redrafted
+          Coordinates in millimetres · proxy geometry is assumption-recorded · 2D panels come from surface flattening
         </small>
       </footer>
     </div>

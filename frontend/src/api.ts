@@ -1,13 +1,10 @@
 import type {
   ApiError,
   AppConfig,
-  BaseBlockCatalog,
-  BaseBlockDetail,
-  DeltaResponse,
+  GenerationResponse,
   Preview,
   Review,
   Settings,
-  TransformResponse,
   ValidationReport,
 } from './types'
 
@@ -35,6 +32,20 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return data as T
 }
 
+async function get<T>(path: string): Promise<T> {
+  const response = await fetch(path)
+  const data = await response.json().catch(() => null)
+  if (!response.ok) {
+    const error = (data as { error?: ApiError })?.error
+    throw new RequestError(error ?? {
+      code: 'http_error',
+      message: `Request failed (${response.status})`,
+      details: [],
+    })
+  }
+  return data as T
+}
+
 /** Everything a request needs to reproduce a generation, exactly as the server saw it. */
 export type GenerationPayload = {
   yamlText: string
@@ -48,7 +59,7 @@ function payload(input: GenerationPayload, settings?: Settings) {
 }
 
 export const api = {
-  config: () => fetch('/api/config').then((r) => r.json() as Promise<AppConfig>),
+  config: () => get<AppConfig>('/api/config'),
 
   validateMeasurements: (filename: string, content: string) =>
     post<Review>('/api/measurements/validate', { filename, content }),
@@ -59,25 +70,12 @@ export const api = {
   report: (input: GenerationPayload) =>
     post<{ can_generate: boolean; blocking: unknown[] }>('/api/measurements/report', payload(input)),
 
-  baseBlocks: () => fetch('/api/base-blocks').then((r) => r.json() as Promise<BaseBlockCatalog>),
-
-  baseBlock: (blockId: string) =>
-    fetch(`/api/base-blocks/${encodeURIComponent(blockId)}`).then(async (r) => {
-      const data = await r.json()
-      if (!r.ok) throw new RequestError(data?.error ?? { code: 'base_block_unavailable', message: 'The base block could not be loaded', details: [] })
-      return data as BaseBlockDetail
+  generate: (input: GenerationPayload, settings: Settings) =>
+    post<GenerationResponse>('/api/patterns/flatten', {
+      ...payload(input, settings),
+      include_mesh: true,
+      include_surfaces: true,
     }),
-
-  validateBaseBlock: (blockId: string) =>
-    post<ValidationReport & { ok: boolean; blockId: string }>(
-      `/api/base-blocks/${encodeURIComponent(blockId)}/validate`, {},
-    ),
-
-  deltas: (input: GenerationPayload, settings: Settings) =>
-    post<DeltaResponse>('/api/base-block/deltas', payload(input, settings)),
-
-  transform: (input: GenerationPayload, settings: Settings) =>
-    post<TransformResponse>('/api/patterns/transform', payload(input, settings)),
 
   validatePattern: (pattern: unknown) =>
     post<{ ok: boolean; issues: { check: string; message: string }[] }>('/api/patterns/validate', { pattern }),
@@ -193,4 +191,4 @@ export type SemanticsResponse = {
   draftingMeasurements: Record<string, number | null> | null
 }
 
-export type { AppConfig, Preview, Review, Settings, TransformResponse, ValidationReport }
+export type { AppConfig, GenerationResponse, Preview, Review, Settings, ValidationReport }

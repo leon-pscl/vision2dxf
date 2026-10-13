@@ -1,4 +1,5 @@
-"""Parametric base-block transformation app: FastAPI serving the API and the built frontend."""
+"""Anthropometric surface reconstruction and mesh flattening: FastAPI serving the
+API and the built frontend."""
 from __future__ import annotations
 
 import logging
@@ -11,11 +12,13 @@ from fastapi.staticfiles import StaticFiles
 from .api.routes import router
 from .drafting.measurements import MeasurementError
 from .drafting.semantics import SemanticError
+from .pipeline import GenerationBlocked
 
 logger = logging.getLogger("app")
 STATIC_DIR = Path(__file__).parent / "static"
 
-app = FastAPI(title="Parametric base-block transformation", version="2.0.0")
+app = FastAPI(title="Anthropometric surface reconstruction and mesh flattening",
+              version="3.0.0")
 app.include_router(router)
 
 
@@ -25,6 +28,16 @@ async def measurement_error_handler(_request: Request, exc: MeasurementError):
         status_code=422,
         content={"error": {"code": "invalid_yaml", "message": "Measurement import failed.",
                            "details": exc.errors}},
+    )
+
+
+@app.exception_handler(GenerationBlocked)
+async def generation_blocked_handler(_request: Request, exc: GenerationBlocked):
+    """A stage refused. The reason is already structured; nothing is invented here."""
+    return JSONResponse(
+        status_code=409,
+        content={"error": {"code": exc.code, "message": exc.message, "details": exc.details},
+                 "stage": exc.stage},
     )
 
 

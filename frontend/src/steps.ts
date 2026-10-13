@@ -1,13 +1,15 @@
 export const STEPS = [
-  { id: 'upload', title: 'Upload YAML' },
-  { id: 'definitions', title: 'Field definitions' },
-  { id: 'review', title: 'Review measurements' },
-  { id: 'base', title: 'Base block & differences' },
-  { id: 'configure', title: 'Ease & limits' },
-  { id: 'generate', title: 'Transform' },
-  { id: 'compare', title: 'Compare base & target' },
-  { id: 'validation', title: 'Review validation' },
-  { id: 'export', title: 'Export files' },
+  { id: 'upload', title: 'Measurements' },
+  { id: 'definitions', title: 'Definitions' },
+  { id: 'review', title: 'Review' },
+  { id: 'configure', title: 'Configure' },
+  { id: 'generate', title: 'Generate' },
+  { id: 'cross-sections', title: 'Cross-sections' },
+  { id: 'surface', title: 'Surface & seams' },
+  { id: 'flattening', title: 'Flattening' },
+  { id: 'pattern', title: 'Pattern' },
+  { id: 'validation', title: 'Validation' },
+  { id: 'export', title: 'Export' },
 ] as const
 
 export type StepId = (typeof STEPS)[number]['id']

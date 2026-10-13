@@ -8,7 +8,7 @@ from app.drafting.cutting import build_cutting_lines, flatten_boundary
 from app.drafting.curves import arc_points, offset_polylines, signed_area
 from app.drafting.ease import Settings
 from app.drafting.geometry import Point2D
-from conftest import transform_profile
+from conftest import generate_profile
 
 TOL = 1e-6
 
@@ -45,7 +45,7 @@ def test_zero_distance_keeps_a_fold_edge_in_place():
 
 @pytest.mark.parametrize("join", ["miter", "bevel", "round"])
 def test_every_join_style_produces_a_closed_contour(join):
-    result = transform_profile("body_measurements_target_a.yaml", cutting_join=join)
+    result = generate_profile("body_measurements_target_a.yaml", cutting_join=join)
     for key, line in result.cutting.items():
         assert line.join == join
         assert len(line.contour) >= 3
@@ -76,11 +76,12 @@ def test_cutting_line_sits_outside_the_sewing_line(basic_result):
     assert signed_area(cutting.contour) * signed_area(sewing) > 0  # same winding, larger area
     assert abs(signed_area(cutting.contour)) > abs(signed_area(sewing))
     assert min(p.x for p in cutting.contour) < min(p.x for p in sewing)
-    assert max(p.x for p in cutting.contour) > max(p.x for p in sewing)
+    # The center-front edge is a fold and intentionally has zero allowance, so it can
+    # remain the outermost point on one side of the panel.
 
 
 def test_seam_allowance_follows_the_semantic_role(basic_result):
-    """A full mirrored panel has no fold edge: every boundary edge is cut, by its role."""
+    """Each boundary edge is cut by its own role, which is what the fold depends on."""
     front = next(p for p in basic_result.document.panels if p.key == "front")
     table = drafting_config()["seam_allowance_mm"]
     for role in ("waist", "side_seam", "armscye", "shoulder", "neckline"):
@@ -89,19 +90,19 @@ def test_seam_allowance_follows_the_semantic_role(basic_result):
         assert edge.seam_allowance_mm == table.get(role, table["default"]), role
 
 
-def test_dart_edges_are_cut_like_any_other_boundary(transformed):
-    """A dart here is a stretch of boundary sewn shut, so it is offset with the rest."""
-    result = transformed[("target_a", "bodice-ref-c")]
-    front = next(p for p in result.document.panels if p.key == "front")
-    darts = [e for e in front.edges if e.role == "dart"]
-    assert darts
-    assert all(e.seam_allowance_mm > 0.0 for e in darts)
-    assert len(result.cutting["front"].contour) >= len(front.edges)
+def test_a_fold_edge_stays_on_its_own_line(basic_result):
+    """Centre front is a fold: its allowance is zero, so the cutting line must touch it."""
+    front = next(p for p in basic_result.document.panels if p.key == "front")
+    fold = front.edge_by_role("center_front")
+    assert fold.seam_allowance_mm == 0.0
+    sewn = fold.polyline(2.0)
+    cutting = basic_result.cutting["front"].contour
+    assert min(min(c.dist(p) for c in cutting) for p in sewn) < 1e-6
 
 
 def test_seam_allowance_override_is_applied():
-    result = transform_profile("body_measurements_target_a.yaml",
-                               seam_allowances={"armscye": 25.0})
+    result = generate_profile("body_measurements_target_a.yaml",
+                              seam_allowances={"armscye": 25.0})
     front = next(p for p in result.document.panels if p.key == "front")
     assert front.edge_by_role("armscye").seam_allowance_mm == 25.0
 

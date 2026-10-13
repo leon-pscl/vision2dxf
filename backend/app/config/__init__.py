@@ -21,9 +21,9 @@ def drafting_config() -> dict:
     return _load("drafting.yaml")
 
 
-def transformation_config() -> dict:
-    """Weights, solver limits, envelope and influence map for the base-block transform."""
-    return _load("transformation.yaml")
+def reconstruction_config() -> dict:
+    """Section model, mesh resolution, ease, seam network, flattening and refit limits."""
+    return _load("reconstruction.yaml")
 
 
 def measurement_dictionary() -> dict:

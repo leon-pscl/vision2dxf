@@ -1,8 +1,8 @@
-# Geometry tolerances, ease presets, seam allowances, paper sizes and the
-# fixture-compatible defaults of the GarmageSet schema.
+# Geometry tolerances, seam allowances, paper sizes and fixture-compatible defaults
+# of the GarmageSet schema. Ease and reconstruction settings live in reconstruction.yaml.
 #
-# Transformation weights, solver limits, the envelope and the influence map live in
-# transformation.yaml. No unexplained constant is allowed inside a geometry function.
+# Reconstruction and flattening weights and limits live in reconstruction.yaml.
+# No unexplained constant is allowed inside a geometry function.
 version: "1.0.0"
 units: mm
 
@@ -24,14 +24,6 @@ tolerances:
 # when deriving a shoulder seam length from an across-shoulder measurement.
 constants:
   shoulder_neck_offset_mm: 50.0
-
-ease_presets:
-  skin_thin: { bust_mm: 20.0, waist_mm: 20.0, hip_mm: 20.0 }
-  close_fitting: { bust_mm: 50.0, waist_mm: 50.0, hip_mm: 50.0 }
-  fitted: { bust_mm: 80.0, waist_mm: 80.0, hip_mm: 80.0 }
-  relaxed: { bust_mm: 140.0, waist_mm: 140.0, hip_mm: 140.0 }
-
-default_ease_preset: fitted
 
 # Seam allowance per semantic edge role. centre edges fold on the fold line (0).
 seam_allowance_mm:

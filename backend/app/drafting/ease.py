@@ -1,57 +1,81 @@
-"""Ease assignment. Ease is applied to girths only; linear dimensions keep their
-measured value unless an explicit override is supplied in the settings."""
+"""Generation settings and the two helpers the cutting-line stage needs.
+
+The ease model itself lives in garment_surface/ease.py; this module only carries the
+request-level settings object, which the whole pipeline is parameterised by.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ..config import drafting_config, seam_allowance
+from ..config import drafting_config, reconstruction_config, seam_allowance
 
 
 @dataclass
 class Settings:
-    garment_type: str = "basic_bodice"
-    # Which base block to transform; empty means the catalog default.
-    base_block_id: str | None = None
+    garment_type: str = "basic_torso"
+
+    # ---- reconstruction ---------------------------------------------------
+    section_model: str = "superellipse"       # ellipse | superellipse
+    section_exponent: float | None = None     # overrides the configured exponent
+    cross_section_resolution: int | None = None
+    longitudinal_segments: int | None = None
+
+    # ---- garment surface --------------------------------------------------
     ease_preset: str = "fitted"
     bust_ease_mm: float | None = None
     waist_ease_mm: float | None = None
     hip_ease_mm: float | None = None
+    armhole_ease_mm: float | None = None
+
+    # ---- seam network -----------------------------------------------------
+    seam_preset: str = "basic_torso_v1"
+    front_neck_drop_mm: float | None = None
+    back_neck_drop_mm: float | None = None
+
+    # ---- flattening -------------------------------------------------------
+    flattening_method: str = "lscm_arap"
+    w_distortion: float | None = None
+    w_boundary: float | None = None
+    w_seam: float | None = None
+    w_grain: float | None = None
+    w_flip: float | None = None
+
+    # ---- output -----------------------------------------------------------
     seam_allowances: dict[str, float] = field(default_factory=dict)
     cutting_join: str | None = None
     paper_size: str | None = None
     paper_orientation: str | None = None
-    # Operator confirmation that a target outside the tested transformation envelope may
-    # still be transformed. A `stop` envelope status is refused regardless.
-    confirm_envelope: bool = False
+
+    # The operator confirms that the file's values are centimetres before anything is
+    # converted. Nothing is generated until this is true.
     unit: str = "cm"
+    confirm_units: bool = False
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
 
+    def exponent(self) -> float | None:
+        return self.section_exponent
 
-@dataclass
-class Ease:
-    bust_mm: float
-    waist_mm: float
-    hip_mm: float
-    preset: str
+    def resolution(self) -> int:
+        cfg = reconstruction_config()["mesh"]
+        return int(self.cross_section_resolution or cfg["cross_section_resolution"])
 
+    def segments(self) -> int:
+        cfg = reconstruction_config()["mesh"]
+        return int(self.longitudinal_segments or cfg["longitudinal_segments"])
 
-def resolve_ease(settings: Settings) -> Ease:
-    presets = drafting_config()["ease_presets"]
-    name = settings.ease_preset if settings.ease_preset in presets else drafting_config()["default_ease_preset"]
-    preset = presets[name]
-    return Ease(
-        bust_mm=settings.bust_ease_mm if settings.bust_ease_mm is not None else preset["bust_mm"],
-        waist_mm=settings.waist_ease_mm if settings.waist_ease_mm is not None else preset["waist_mm"],
-        hip_mm=settings.hip_ease_mm if settings.hip_ease_mm is not None else preset["hip_mm"],
-        preset=name,
-    )
+    def weights(self) -> dict[str, float]:
+        base = dict(reconstruction_config()["flattening"]["objective"])
+        for key in ("w_distortion", "w_boundary", "w_seam", "w_grain", "w_flip"):
+            value = getattr(self, key)
+            if value is not None:
+                base[key] = float(value)
+        return base
 
 
 def resolve_join(settings: Settings) -> str:
-    default = drafting_config()["cutting_join"]
-    return settings.cutting_join or default
+    return settings.cutting_join or drafting_config()["cutting_join"]
 
 
 def allowance_for(role: str, override: dict[str, float] | None = None) -> float:

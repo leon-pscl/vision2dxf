@@ -111,10 +111,10 @@ def test_round_trip_preserves_coordinates_exactly(basic_result):
 
 
 def test_serialisation_is_deterministic():
-    from conftest import transform_profile
+    from conftest import generate_profile
 
-    first = to_fixture_dict(transform_profile("body_measurements_target_a.yaml").document)
-    second = to_fixture_dict(transform_profile("body_measurements_target_a.yaml").document)
+    first = to_fixture_dict(generate_profile("body_measurements_target_a.yaml").document)
+    second = to_fixture_dict(generate_profile("body_measurements_target_a.yaml").document)
     assert json.dumps(first) == json.dumps(second)
 
 

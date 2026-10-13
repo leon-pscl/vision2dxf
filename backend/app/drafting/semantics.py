@@ -684,3 +684,34 @@ def _build_measurements(reg, resolved, blocking):
                                "Re-check the confirmed interpretations."))
         return None, derived
     return measurements, derived
+
+
+# The interpretation the prototype assumes when an operator has not chosen one. Each entry
+# is a real choice between the candidates the registry offers, not a default the schema
+# declares, so the resolution reports every one of them as ASSUMED rather than CONFIRMED.
+DEFAULT_CONFIRMATIONS = {
+    "back_width": "across_back_side_to_side",
+    "waist_back_width": "across_back_side_to_side",
+    "hip_back_width": "across_back_side_to_side",
+    "neck_w": "half_neck_girth",
+    "shoulder_w": "half_neck_to_shoulder_tip",
+    "shoulder_incl": "below_horizontal",
+    "bust_line": "level_from_neck_reference_point",
+    "waist_line": "level_from_neck_reference_point",
+    "waist_over_bust_line": "level_from_neck_reference_point",
+    "vert_bust_line": "neck_reference_point_to_bust_apex",
+    # The default interpretation of the source measurement is the direct vertical drop from
+    # the shoulder-tip level to the underarm point. The neck-reference variant is still
+    # supported as an explicit operator choice when that is how a given dataset defines it.
+    "armscye_depth": "shoulder_tip_level_to_underarm",
+    "bust_points": "chest_wall_to_apex",
+    "bum_points": "lower_back_to_apex",
+    "hips_line": "level_from_crotch_point",
+    "hip_inclination": "below_horizontal",
+    "arm_pose_angle": "from_vertical",
+}
+
+
+def default_confirmations() -> dict[str, str]:
+    """A copy, so a caller cannot mutate the table."""
+    return dict(DEFAULT_CONFIRMATIONS)

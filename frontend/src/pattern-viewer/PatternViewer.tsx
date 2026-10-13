@@ -49,6 +49,10 @@ export function PatternViewer({ preview }: { preview: Preview }) {
     setMarks([])
   }, [preview])
 
+  useEffect(() => {
+    setLayers(DEFAULT_LAYERS.filter((layer) => preview.layers.includes(layer)))
+  }, [preview])
+
   // Layer visibility is toggled straight on the SVG groups: one render, no round trip.
   useEffect(() => {
     svgRef.current?.querySelectorAll<SVGGElement>('[data-layer]').forEach((group) => {
@@ -108,7 +112,7 @@ export function PatternViewer({ preview }: { preview: Preview }) {
           <Button onClick={() => setView(base)} title="Fit to view">Fit</Button>
         </div>
         <div className="toolbar-group" role="group" aria-label="Layers">
-          {(Object.keys(LAYER_LABELS) as LayerName[]).map((layer) => (
+          {preview.layers.filter((layer): layer is LayerName => layer in LAYER_LABELS).map((layer) => (
             <Toggle
               key={layer}
               label={LAYER_LABELS[layer]}

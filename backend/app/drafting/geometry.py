@@ -77,11 +77,8 @@ class PatternEdge:
 
     Geometry is held in exactly one of two forms:
 
-    * `points` - the sampled control polyline the GarmageSet schema stores, which is what
-      a base block loaded from a template carries. Deforming a template means moving
-      these points, so keeping them is lossless: an unchanged target reproduces the
-      source edge exactly.
-    * `curve` - a single cubic, for edges that were constructed analytically.
+    * `points` - the simplified flattened boundary polyline serialized for this edge.
+    * `curve` - a cubic fit to a curved flattened boundary interval.
 
     With neither, the edge is the straight segment from `start` to `end`.
     """
