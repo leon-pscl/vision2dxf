@@ -1,0 +1,112 @@
+# Frozen benchmark configuration for Design 3.
+#
+# Changing any value here increments `configuration_version` and invalidates every
+# earlier result: the final metrics are only meaningful against one frozen configuration.
+#
+# The reconstruction and flattening settings themselves are NOT here. They live in
+# backend/app/config/*.yaml, which is the single frozen configuration the engine reads.
+configuration_version: "1.0.0"
+
+# ---- frozen inputs -----------------------------------------------------------
+
+cases:
+  - case_id: d3-case-001-central
+    role: mandatory
+    measurements: fixtures/measurements/d3-case-001-central.yaml
+  - case_id: d3-case-002-larger
+    role: mandatory
+    measurements: fixtures/measurements/d3-case-002-larger.yaml
+  - case_id: d3-case-003-smaller
+    role: mandatory
+    measurements: fixtures/measurements/d3-case-003-smaller.yaml
+  # Control case, not a mandatory one: it lies outside the declared supported domain and
+  # must be refused with a structured code. It is run so the failure policy is exercised
+  # and the failure stays in the log rather than being quietly dropped.
+  - case_id: d3-case-004-off-average
+    role: control
+    measurements: fixtures/measurements/d3-case-004-off-average.yaml
+
+garment: fixtures/garments/d3-basic-torso.yaml
+
+# ---- trial counts -----------------------------------------------------------
+
+trials:
+  warmups: 5
+  memory_trials: 30
+  time_trials: 30
+  # `--smoke` runs this instead, to prove the harness end to end before the official run.
+  smoke:
+    cases: [d3-case-001-central]
+    warmups: 1
+    memory_trials: 3
+    time_trials: 3
+
+# ---- thread control ---------------------------------------------------------
+#
+# Documented and applied to every trial, so a median is not a mix of thread counts.
+# Set before numpy is imported.
+threading:
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  NUMEXPR_NUM_THREADS: "1"
+  VECLIB_MAXIMUM_THREADS: "1"
+
+# ---- Metric 5 allow-list ----------------------------------------------------
+#
+# The production modules that implement stages A-I of the Design 3 algorithm. Included:
+# a module holds geometry or pattern-conversion logic that only the Design 3 surface route
+# uses. Excluded: shared schemas, the common validator, the common DXF exporter, config,
+# tests, fixtures and this benchmark.
+#
+# `role` is the inclusion rationale recorded against every row of the maintainability CSV.
+# Adding or removing a file here moves Metric 5 directly.
+maintainability:
+  files:
+    - path: backend/app/pipeline.py
+      role: Stage orchestrator; runs stages A to I end to end.
+    - path: backend/app/reconstruction/anatomical_levels.py
+      role: Stage A; places and orders the anatomical section levels.
+    - path: backend/app/reconstruction/cross_sections.py
+      role: Stage B; builds each ordered cross-section ring.
+    - path: backend/app/reconstruction/perimeter_solver.py
+      role: Stage B; solves section depth and width against the confirmed girth.
+    - path: backend/app/reconstruction/lofting.py
+      role: Stage C; lofts the rings into the 3D surface.
+    - path: backend/app/reconstruction/smoothing.py
+      role: Stage C; constraint-preserving smoothing of the lofted surface.
+    - path: backend/app/reconstruction/landmarks.py
+      role: Stage D; resolves the anatomical ring columns the seam network snaps to.
+    - path: backend/app/garment_surface/ease.py
+      role: Stage C; the frozen ease-distribution rule.
+    - path: backend/app/garment_surface/offset.py
+      role: Stage C; applies ease to build the garment surface.
+    - path: backend/app/garment_surface/seams.py
+      role: Stage D; places the predetermined seam, fold and armscye paths.
+    - path: backend/app/garment_surface/segmentation.py
+      role: Stages D and E; splits the surface into disk-topology panels and triangulates them.
+    - path: backend/app/flattening/triangulation.py
+      role: Stage E; local frames, cotangents and 3D mesh quality.
+    - path: backend/app/flattening/parameterization.py
+      role: Stages F and G; LSCM initialisation and constrained ARAP flattening.
+    - path: backend/app/flattening/distortion.py
+      role: Stage H; flattening diagnostics against the isometric unfolding.
+    - path: backend/app/flattening/boundary_refit.py
+      role: Stage I; extracts the flattened boundary and fits lines and curves.
+    - path: backend/app/flattening/seam_balance.py
+      role: Stage I; balances paired seam lengths before assembly.
+    - path: backend/app/serialization/garmageset.py
+      role: Stage I; converts the pattern to the common JSON-compatible representation.
+
+# ---- outputs ----------------------------------------------------------------
+
+outputs:
+  directory: results
+  trials_csv: design_3_trials.csv
+  case_summary_csv: design_3_case_summary.csv
+  mesh_diagnostics_csv: design_3_mesh_diagnostics.csv
+  failures_jsonl: design_3_failures.jsonl
+  environment_json: design_3_environment.json
+  config_manifest_json: design_3_config_manifest.json
+  maintainability_csv: design_3_maintainability.csv
+  final_metrics_json: design_3_final_metrics.json

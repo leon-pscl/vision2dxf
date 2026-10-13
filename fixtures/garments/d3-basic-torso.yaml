@@ -1,0 +1,20 @@
+# Frozen garment configuration for every Design 3 benchmark trial.
+#
+# One garment for every case, so the measured differences come from the measurements and
+# not from the configuration. The reconstruction and flattening settings are read from
+# backend/app/config/reconstruction.yaml, not from here.
+configuration_version: "1.0.0"
+approved_by: project-lead
+approval_date: '2026-10-13'
+approval_status: approved
+
+# Passed verbatim to generate_pattern as the `garment` argument.
+settings:
+  garment_type: basic_torso
+  ease_preset: fitted
+  section_model: superellipse
+  seam_preset: basic_torso_v1
+  flattening_method: lscm_arap
+  cutting_join: miter
+  paper_size: A0
+  paper_orientation: landscape

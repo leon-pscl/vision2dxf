@@ -167,3 +167,75 @@ npm run build
 The geometry tests include analytic plane, cylinder, truncated-cone, and sphere fixtures,
 as well as reconstruction, seam, segmentation, flattening, serializer, validation, and
 full-scale export checks.
+
+## Benchmark
+
+`benchmark/` measures the Chapter 3 metrics for this design. It wraps the production
+pipeline rather than reimplementing any of it.
+
+```powershell
+python benchmark/run_design_3.py --smoke   # 1 case, 3 + 3 trials: proves the harness
+python benchmark/run_design_3.py           # the compliant run
+python benchmark/maintainability_check.py  # Metric 5, on its own
+python benchmark/assemble_metrics.py       # final metrics, from the raw result files
+python benchmark/environment.py            # environment record, on its own
+```
+
+| File | Purpose |
+|---|---|
+| `benchmark/config-design-3.yaml` | Frozen cases, trial counts, thread counts, Metric 5 allow-list, output paths |
+| `benchmark/_child.py` | One trial in one fresh process: memory pass or time pass |
+| `benchmark/run_design_3.py` | Spawns every trial and writes the trial, diagnostics, failure and summary files |
+| `benchmark/maintainability_check.py` | Metric 5, Radon 6.0.1, source-line-weighted |
+| `benchmark/assemble_metrics.py` | Generates `design_3_final_metrics.json`; never hand-edited |
+| `benchmark/environment.py` | Environment record and configuration fingerprint |
+| `fixtures/measurements/` | Frozen case fixtures, pseudonymous, approved |
+| `fixtures/garments/` | Frozen garment configuration, one for every case |
+
+Every trial runs in a fresh child process and the memory pass and the time pass are
+separate passes, so no trial inherits another's allocator state and tracemalloc never
+inflates a timing. A trial that fails stays in `design_3_trials.csv` with its error code
+and is repeated in `design_3_failures.jsonl`; nothing is retried or replaced.
+
+## The common program interface
+
+`backend/app/design3_interface.py` is the one function every Design 3 consumer calls:
+
+```python
+from app.design3_interface import generate_pattern
+
+pattern = generate_pattern(measurements_dict, garment_dict)  # millimetres
+```
+
+It is an adapter over `pipeline.generate`, not a second implementation: no geometry,
+solver, weight or tolerance is defined there, so `config/reconstruction.yaml` still governs
+every number that reaches the pattern. The returned object carries the schema and units,
+panels and identifiers, ordered seam-line boundary entities, cutting lines and allowances,
+grainlines, fold edges, notches, labels, darts, stitch-pair identifiers, the validated
+report and provenance. Every refusal raises `Design3Failure` with a code from
+`FAILURE_CODES`.
+
+`run_design_3(measurements, garment, dxf_output)` is the same work plus the common
+validator and the common DXF exporter, which is the benchmark's measured boundary.
+
+## Measured metrics
+
+`results/design_3_final_metrics.json` is generated from the raw files. Two of the five
+Chapter 3 metrics are null, deliberately:
+
+- **Metric 2, feature completeness** — not measured. It needs a frozen, approved
+  `feature_manifest.csv`, and this repository does not have one. Darts and notches are
+  modelled throughout the backend but never populated by the pipeline, so a manifest
+  written today would either overstate completeness or have to declare them
+  non-applicable; that is a scoping decision, not a measurement.
+- **Metric 4, pattern-dimension MAE** — not measured. It needs reference seam-line
+  dimensions from independently approved patterns for the garment this design generates.
+  The only reference in the repository, `fixtures/garmageset-reference.json`, is a
+  19-panel skirt-and-dress set, not a torso bodice, and a reference synthesised from a
+  drafting oracle would not be an independent approval. Reporting a number the protocol
+  cannot support is worse than reporting none.
+
+Metrics 1, 3 and 5 are measured by the harness. See
+`results/design_3_case_summary.csv` for per-case medians and interquartile ranges, and
+`results/design_3_environment.json` for the interpreter, CPU, libraries and configuration
+hash the numbers were produced on.

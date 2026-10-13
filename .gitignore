@@ -10,3 +10,6 @@ dist/
 # The full GarmageSet library is too large to version; the templates the base-block
 # catalog pins are committed under assets/base-blocks/templates instead.
 /templates/
+# Console log of a benchmark run. The record of the run is results/design_3_trials.csv;
+# the log is a console transcript of it.
+results/run_log.txt
