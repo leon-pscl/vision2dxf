@@ -32,6 +32,8 @@ clamped:
   shoulder_slope_deg: true
 
 constants:
+  # ASSUMED: every value below is author-selected; no published drafting method is cited
+  # in this repository (no source_comment provenance beyond the internal design doc).
   # distance from the shoulder-neck point back along the shoulder to the neck point
   shoulder_neck_offset_mm: 50.0
   # neckline half width = share * neck_w   (neck_w is read as half neck girth)

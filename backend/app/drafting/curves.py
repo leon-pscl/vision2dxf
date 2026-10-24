@@ -52,6 +52,54 @@ def _edge_normals(pts: list[Point2D], mid: Point2D) -> list[tuple[float, float]]
     return normals
 
 
+def _convex_at(polylines: list[list[Point2D]], orientation: float, i: int) -> bool:
+    prev = (i - 1) % len(polylines)
+    vertex = polylines[i][0]
+    p_in = polylines[prev][0]
+    p_out = polylines[i][1] if len(polylines[i]) > 1 else polylines[i][-1]
+    v_in = (vertex.x - p_in.x, vertex.y - p_in.y)
+    v_out = (p_out.x - vertex.x, p_out.y - vertex.y)
+    cross = v_in[0] * v_out[1] - v_in[1] * v_out[0]
+    if orientation >= 0.0:
+        return cross > 1e-12
+    return cross < -1e-12
+
+
+def _ring_is_simple(points: list[Point2D]) -> bool:
+    if len(points) < 4:
+        return True
+    segs = [(points[i], points[(i + 1) % len(points)]) for i in range(len(points))]
+
+    def orient(a: Point2D, b: Point2D, c: Point2D) -> float:
+        return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+
+    def on_segment(a: Point2D, b: Point2D, c: Point2D) -> bool:
+        return (min(a.x, b.x) - 1e-9 <= c.x <= max(a.x, b.x) + 1e-9 and
+                min(a.y, b.y) - 1e-9 <= c.y <= max(a.y, b.y) + 1e-9)
+
+    for i in range(len(segs)):
+        a, b = segs[i]
+        for j in range(i + 2, len(segs)):
+            if j == len(segs) - 1 and i == 0:
+                continue
+            c, d = segs[j]
+            d1 = orient(c, d, a)
+            d2 = orient(c, d, b)
+            d3 = orient(a, b, c)
+            d4 = orient(a, b, d)
+            if ((d1 > 1e-9) != (d2 > 1e-9)) and ((d3 > 1e-9) != (d4 > 1e-9)):
+                return False
+            if abs(d1) <= 1e-9 and on_segment(c, d, a):
+                return False
+            if abs(d2) <= 1e-9 and on_segment(c, d, b):
+                return False
+            if abs(d3) <= 1e-9 and on_segment(a, b, c):
+                return False
+            if abs(d4) <= 1e-9 and on_segment(a, b, d):
+                return False
+    return True
+
+
 def offset_polylines(
     polylines: list[list[Point2D]],
     distances: list[float],
@@ -59,14 +107,6 @@ def offset_polylines(
     miter_limit: float = 4.0,
     arc_steps: int = 8,
 ) -> list[Point2D]:
-    """Outward offset of a closed chain of edges, one distance per edge.
-
-    An edge with distance 0 stays on its own line, which is how fold edges are
-    represented. Joins are placed at the shared vertex between two consecutive
-    edges: miter (clamped to miter_limit, else bevel), a straight bevel, or an arc.
-    `ponytail:` concave corners use the same construction; swap in a clipping
-    library only when self-intersecting offsets actually have to be repaired.
-    """
     if join not in JOIN_STYLES:
         raise ValueError(f"unknown join style: {join}")
     if len(polylines) != len(distances) or len(polylines) < 3:
@@ -81,6 +121,9 @@ def offset_polylines(
         for line, ns, d in zip(polylines, normals, distances)
     ]
 
+    corners = [line[0] for line in polylines]
+    orientation = signed_area(corners)
+
     count = len(polylines)
     out: list[Point2D] = []
     for i in range(count):
@@ -91,12 +134,14 @@ def offset_polylines(
         r_in, r_out = distances[prev], distances[i]
         n_in, n_out = normals[prev][-1], normals[i][0]
 
+        is_concave = not _convex_at(polylines, orientation, i)
         if a.dist(b) < 1e-12:
             out.append(b)
-        elif join == "round" and abs(r_in - r_out) < 1e-9 and r_out > 1e-9:
+        elif join == "round" and abs(r_in - r_out) < 1e-9 and r_out > 1e-9 and not is_concave:
             out.extend(arc_points(a, b, vertex, arc_steps))
-        elif join == "bevel" or abs(r_in - r_out) > 1e-9 or r_out <= 1e-9 or r_in <= 1e-9:
-            out.extend([a, b])  # bevel: also covers the fold transition
+        elif (join == "bevel" or is_concave or abs(r_in - r_out) > 1e-9 or
+              r_out <= 1e-9 or r_in <= 1e-9):
+            out.extend([a, b])
         else:
             bx, by = n_in[0] + n_out[0], n_in[1] + n_out[1]
             blen = hypot(bx, by)
@@ -110,7 +155,26 @@ def offset_polylines(
                 else:
                     out.extend([a, b])
         out.extend(offset[i][1:-1])
-    return out
+
+    cleaned: list[Point2D] = [out[0]]
+    for p in out[1:]:
+        if p.dist(cleaned[-1]) > 1e-9:
+            cleaned.append(p)
+    if len(cleaned) < 3:
+        raise ValueError("offset contour self-intersects and could not be repaired")
+    if not _ring_is_simple(cleaned):
+        from shapely.geometry import Polygon
+        original_area = signed_area(cleaned)
+        repaired_poly = Polygon([(p.x, p.y) for p in cleaned]).buffer(0)
+        if repaired_poly.is_empty or repaired_poly.geom_type not in ("Polygon",):
+            raise ValueError("offset contour self-intersects and could not be repaired")
+        repaired_points = [Point2D(x, y) for x, y in repaired_poly.exterior.coords[:-1]]
+        if original_area * signed_area(repaired_points) < 0:
+            repaired_points.reverse()
+        cleaned = repaired_points
+        if len(cleaned) < 3:
+            raise ValueError("offset contour self-intersects and could not be repaired")
+    return cleaned
 
 
 def polyline_length(points: list[Point2D]) -> float:

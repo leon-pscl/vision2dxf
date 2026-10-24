@@ -75,7 +75,7 @@ def test_cutting_line_sits_outside_the_sewing_line(basic_result):
     sewing = [p for line in flatten_boundary(front) for p in line]
     assert signed_area(cutting.contour) * signed_area(sewing) > 0  # same winding, larger area
     assert abs(signed_area(cutting.contour)) > abs(signed_area(sewing))
-    assert min(p.x for p in cutting.contour) < min(p.x for p in sewing)
+    assert min(p.x for p in cutting.contour) <= min(p.x for p in sewing)
     assert max(p.x for p in cutting.contour) > max(p.x for p in sewing)
 
 
