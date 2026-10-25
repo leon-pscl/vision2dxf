@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import argparse
 import ast
+import random
+
+random.seed(42)
 import csv
 import json
 import math

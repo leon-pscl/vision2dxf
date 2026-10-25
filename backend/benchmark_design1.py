@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import builtins
 import csv
+import random
+
+random.seed(42)
 import json
 import os
 import statistics
