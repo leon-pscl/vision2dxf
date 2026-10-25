@@ -13,7 +13,8 @@ name.
 
 ## Before you run it
 
-**Download the GarmageSet pattern library and put it at `pattern_templates/` in this repository.**
+**Download the GarmageSet pattern library and put it in `pattern_templates/local/` in this
+repository.**
 It is 2.9 GB of pattern JSON, one file per garment set, named after the hash of its own
 contents. It is a developer prerequisite, not part of this repository: `.gitignore`
 excludes `/pattern_templates/`, and a `pre-commit` hook refuses any file over 5 MB so it cannot be
@@ -22,6 +23,25 @@ committed by accident. Enable the hook once per clone:
 ```bash
 git config core.hooksPath .githooks
 ```
+
+The library ships as a Hugging Face bucket, [`leonpscl/GarmageSet-bucket`][bucket], and is
+fetched with the `hf` CLI — on the bucket page, **Sync this bucket** gives the same two
+commands:
+
+[bucket]: https://huggingface.co/buckets/leonpscl/GarmageSet-bucket
+
+```powershell
+# once, from any shell: install the hf CLI
+powershell -ExecutionPolicy ByPass -c "irm https://hf.co/cli/install.ps1 | iex"
+```
+
+```bash
+cd pattern_templates
+hf sync hf://buckets/leonpscl/GarmageSet-bucket ./local
+```
+
+`hf sync` writes into `pattern_templates/local/` and is re-runnable: it copies what is
+missing or changed and leaves the rest alone.
 
 The three catalogued base blocks are committed under `assets/base-blocks/templates/`, so
 the application itself runs without the library. You need it to select a template the
