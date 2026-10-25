@@ -8,7 +8,7 @@ GarmageSet-like pattern with production files.
 **The pattern is produced from the reconstructed 3D surface.** The generation pipeline does
 not load or deform a 2D master block, use sequential drafting formulas, retrieve a pattern,
 or use a learned pattern generator. Measurements are scalar inputs, not a full body scan:
-the result is an assumption-recorded proxy surface, not an exact reconstruction of an
+the result is an assumption-recorded proxy anthropometric surface, not an exact reconstruction of an
 individual's body.
 
 ## Scope and workflow

@@ -55,6 +55,7 @@ class SeamNetwork:
     top_half_width_mm: float
     underarm_y_mm: float
     waist_y_mm: float
+    hem_y_mm: float
     shoulder_slope_deg: float
     front_neck_drop_mm: float
     back_neck_drop_mm: float
@@ -108,6 +109,7 @@ class SeamNetwork:
             "shoulderSlopeDeg": self.shoulder_slope_deg,
             "underarmYMm": round(self.underarm_y_mm, 4),
             "waistYMm": round(self.waist_y_mm, 4),
+            "hemYMm": round(self.hem_y_mm, 4),
             "frontNeckDropMm": self.front_neck_drop_mm,
             "backNeckDropMm": self.back_neck_drop_mm,
             "roles": list(SEAM_ROLES),
@@ -166,6 +168,8 @@ def build_seam_network(
 
     underarm_y = levels["underarm"].y_mm + underarm_drop_mm
     waist_y = levels["waist"].y_mm
+    hem_drop = float(cfg["hem_drop_below_waist_mm"])
+    hem_y = waist_y + hem_drop
 
     # The neck point and the shoulder tip snap to ring columns, and the trim curve then
     # changes regime at the snapped positions rather than at the measured ones. Otherwise
@@ -188,6 +192,7 @@ def build_seam_network(
         top_half_width_mm=top_half_width,
         underarm_y_mm=underarm_y,
         waist_y_mm=waist_y,
+        hem_y_mm=hem_y,
         shoulder_slope_deg=m.shoulder_slope_degrees,
         front_neck_drop_mm=float(settings.front_neck_drop_mm
                                  if settings.front_neck_drop_mm is not None
@@ -221,6 +226,12 @@ def build_seam_network(
             "armscye_depth", "ARMSCYE_BELOW_WAIST",
             f"The underarm level ({underarm_y:.1f} mm) is not above the waist "
             f"({waist_y:.1f} mm).",
+        )])
+    if not waist_y < hem_y:
+        raise SeamError([_err(
+            "hem_drop_below_waist_mm", "HEM_ABOVE_WAIST",
+            f"The dress hem ({hem_y:.1f} mm) is not below the waist ({waist_y:.1f} mm). "
+            f"Check dress_hem_drop_below_waist_mm.",
         )])
 
     registry.add(
@@ -268,6 +279,13 @@ def build_seam_network(
             level, so a fraction of it lowers the underarm. The fraction is chosen.""",
             [], True,
         )
+    registry.add(
+        "seam.dress_hem", "Dress hem drop below the waist", hem_drop, "mm",
+        """body_measurements.yaml carries no garment length or hem level. The dress panel
+        is extended below the waist by this configured drop. It is a product setting,
+        not a body measurement.""",
+        ["waist_line"], True,
+    )
     return network
 
 

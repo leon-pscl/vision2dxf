@@ -107,7 +107,7 @@ def _panel(
     verts = np.empty((rows * cols, 3))
     for c, column in enumerate(columns):
         top = network.trim_y(side, column)
-        bottom = network.waist_y_mm
+        bottom = network.hem_y_mm
         if not top < bottom:
             errors.append(_err(key, "PANEL_COLUMN_INVERTED",
                                f"Column {column} of the {key} panel is cut at "

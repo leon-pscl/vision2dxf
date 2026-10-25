@@ -109,6 +109,12 @@ seams:
     # Front and back shoulder seams are matched in 3D by moving the back neck point.
     max_iterations: 12
     tolerance_mm: 0.5
+  # ASSUMED, garment length. body_measurements.yaml carries no hem or garment-length
+  # field. The dress panel is extended below the waist by this drop. It is a product
+  # setting rather than a body measurement, and is reported in the
+  # generation-manifest.json assumption registry. Changing it changes only the
+  # skirt length of the resulting dress.
+  hem_drop_below_waist_mm: 200.0
 
 flattening:
   # lscm_arap: least-squares conformal map for the initial layout, as-rigid-as-possible

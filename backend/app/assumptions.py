@@ -1,7 +1,7 @@
 """Assumption registry.
 
 The input is a handful of scalar measurements, not a scan, so most of the reconstructed
-surface rests on something nobody measured. Every such value is recorded here and written
+proxy anthropometric surface rests on something nobody measured. Every such value is recorded here and written
 to generation-manifest.json. Nothing in this registry ever reaches the compatibility
 pattern JSON.
 """
