@@ -59,3 +59,4 @@ out/
 
 # Backend generated static bundle
 backend/app/static/
+pattern_templates
