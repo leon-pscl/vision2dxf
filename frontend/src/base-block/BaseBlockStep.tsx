@@ -81,7 +81,7 @@ export function BaseBlockStep({
       {error ? <Callout tone="error" title="Request failed">{error}</Callout> : null}
 
       <div className="block-grid">
-        {catalog?.blocks.map((block) => (
+        {catalog?.blocks?.map((block) => (
           <button
             key={block.id}
             type="button"
@@ -125,7 +125,7 @@ export function BaseBlockStep({
         ))}
       </div>
 
-      {catalog?.templateSelection.supported ? (
+      {catalog?.templateSelection?.supported ? (
         <fieldset>
           <legend>Load any template in the library</legend>
           <p className="muted small">{catalog.templateSelection.note}</p>
@@ -156,7 +156,7 @@ export function BaseBlockStep({
               checked by a person, and it carries the same validation report as any other block.
             </Callout>
           )}
-          {detail.notes.map((note) => (
+          {detail?.notes?.map((note) => (
             <Callout key={note.code} tone="warn" title={note.code.replace(/_/g, ' ')}>
               {note.message}
             </Callout>
@@ -203,7 +203,7 @@ export function BaseBlockStep({
                 </tr>
               </thead>
               <tbody>
-                {deltas.deltas.map((delta) => (
+                {deltas?.deltas?.map((delta) => (
                   <tr key={delta.name} className={!delta.mapped && delta.deltaValue !== 0 ? 'row-warn' : undefined}>
                     <th scope="row">{delta.name.replace(/_/g, ' ')}</th>
                     <td className="nowrap">{delta.baseValue.toFixed(1)} {delta.unit}</td>
@@ -235,8 +235,8 @@ export function BaseBlockStep({
               }
             >
               <ul className="stack-tight">
-                {envelope.entries
-                  .filter((entry) => entry.status !== 'ok')
+                {envelope?.entries
+                  ?.filter((entry) => entry.status !== 'ok')
                   .map((entry) => (
                     <li key={entry.name}>{entry.message}</li>
                   ))}

@@ -1,0 +1,27 @@
+const { chromium } = require('/c/Users/Leon/Documents/Github/vision2dxf/frontend/node_modules/playwright');
+const fs = require('fs');
+(async () => {
+  const browser = await chromium.launch();
+  const page = await browser.newPage();
+  page.on('console', m => console.log('CONSOLE', m.type(), m.text()));
+  page.on('pageerror', e => console.log('PAGEERROR', e.message));
+  await page.goto('http://localhost:8000/');
+  await page.waitForTimeout(2000);
+  const txt = fs.readFileSync('../fixtures/body_measurements.yaml','utf8');
+  await page.locator('textarea').fill(txt);
+  await page.getByRole('button', { name: /Validate measurements/i }).click();
+  await page.waitForTimeout(2000);
+  await page.locator('button').filter({ hasText: 'Field definitions' }).click();
+  await page.waitForTimeout(1000);
+  await page.getByRole('button', { name: /Resolve field definitions/i }).click();
+  await page.waitForTimeout(3000);
+  const confirmAll = page.getByRole('button', { name: /Confirm all offered definitions/i });
+  if (await confirmAll.isEnabled()) await confirmAll.click();
+  await page.waitForTimeout(2000);
+  await page.locator('button').filter({ hasText: 'Base block & differences' }).click();
+  await page.waitForTimeout(3000);
+  await page.screenshot({ path: 'step4.png' });
+  const html = await page.content();
+  console.log('BODY LENGTH', html.length);
+  await browser.close();
+})();

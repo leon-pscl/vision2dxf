@@ -58,6 +58,15 @@ def export_dxf(doc: PatternDocument, cutting: dict[str, CuttingLine]) -> bytes:
         p = world_point(panel, Point2D(0.0, 0.0))
         msp.add_text(panel.label, height=14, dxfattribs={"layer": "LABELS"}).set_placement((p.x, p.y))
 
+    for panel in doc.panels:
+        for name, pt in getattr(panel, "landmarks", {}).items():
+            if pt is None:
+                continue
+            p = world_point(panel, pt)
+            s = 2.0
+            msp.add_line((p.x - s, p.y), (p.x + s, p.y), dxfattribs={"layer": "CONSTRUCTION"})
+            msp.add_line((p.x, p.y - s), (p.x, p.y + s), dxfattribs={"layer": "CONSTRUCTION"})
+
     buf = io.StringIO()
     dxf.write(buf)
     return buf.getvalue().encode("utf-8")

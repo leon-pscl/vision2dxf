@@ -74,6 +74,11 @@ if STATIC_DIR.is_dir():
         candidate = (STATIC_DIR / full_path).resolve()
         if full_path and candidate.is_file() and STATIC_DIR.resolve() in candidate.parents:
             return FileResponse(candidate)
+        _SPA_ROUTES = {"upload", "definitions", "review", "base", "configure",
+                       "generate", "compare", "validation", "export"}
+        _first = full_path.split("/", 1)[0]
+        if _first in _SPA_ROUTES:
+            return FileResponse(STATIC_DIR / "index.html")
         return JSONResponse(
             status_code=404,
             content={"error": {"code": "not_found", "message": f"No route for /{full_path}", "details": []}},

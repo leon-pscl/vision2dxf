@@ -72,7 +72,7 @@ export function DefinitionsStep({
   }, [state, onlyUnresolved])
 
   const open = state ? canGenerate(state.source.fields) : false
-  const ambiguous = state?.source.fields.filter((f) => f.status === 'AMBIGUOUS') ?? []
+  const ambiguous = state?.source?.fields?.filter((f) => f.status === 'AMBIGUOUS') ?? []
 
   const confirmAll = () => {
     const confirmations: Record<string, string> = { ...input.confirmations }

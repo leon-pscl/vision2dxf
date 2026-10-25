@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { api, RequestError, type GenerationPayload } from './api'
 import { Stepper } from './components/Stepper'
 import { Button, Callout, Spinner } from './components/ui'
@@ -37,7 +39,13 @@ const EMPTY_PAYLOAD: GenerationPayload = {
 }
 
 export default function App() {
-  const [step, setStep] = useState(0)
+  const location = useLocation()
+  const navigate = useNavigate()
+  const currentId: StepId = (STEPS.some((s) => s.id === location.pathname.slice(1))
+    ? location.pathname.slice(1)
+    : 'upload') as StepId
+  const step = stepIndex(currentId)
+  const go = (id: StepId) => navigate('/' + id)
   const [input, setInput] = useState<GenerationPayload>(EMPTY_PAYLOAD)
   const [review, setReview] = useState<Review | null>(null)
   const [semanticsReady, setSemanticsReady] = useState(false)
@@ -65,10 +73,10 @@ export default function App() {
     setError(null)
     try {
       setResult(await api.transform(input, settings))
-      setStep(stepIndex('compare'))
+      go('compare')
     } catch (e) {
       setError(e instanceof RequestError ? e.message : 'Transformation failed')
-      setStep(stepIndex('base'))
+      go('base')
     } finally {
       setBusy(false)
     }
@@ -117,7 +125,7 @@ export default function App() {
         </div>
       </header>
 
-      <Stepper current={step} reachable={(i) => i <= furthest || i === step} onSelect={setStep} />
+      <Stepper current={step} reachable={(i) => i <= furthest || i === step} onSelect={(i) => go(STEPS[i].id)} />
 
       <main>
         {error ? (
@@ -137,7 +145,7 @@ export default function App() {
               setSemanticsReady(false)
               setBlockReady(false)
               invalidate()
-              setStep(stepIndex('definitions'))
+              go('definitions')
             }}
           />
         ) : null}
@@ -150,7 +158,7 @@ export default function App() {
               invalidate()
               setSemanticsReady(false)
             }}
-            onBack={() => setStep(stepIndex('upload'))}
+            onBack={() => go('upload')}
             onReady={() => setSemanticsReady(true)}
           />
         ) : null}
@@ -171,6 +179,7 @@ export default function App() {
         ) : null}
 
         {step === stepIndex('base') ? (
+          <ErrorBoundary>
           <BaseBlockStep
             input={input}
             settings={settings}
@@ -180,6 +189,7 @@ export default function App() {
             }}
             onReady={setBlockReady}
           />
+          </ErrorBoundary>
         ) : null}
 
         {step === stepIndex('configure') ? (
@@ -222,7 +232,9 @@ export default function App() {
         ) : null}
 
         {step === stepIndex('compare') && result ? (
+          <ErrorBoundary>
           <ComparisonViewer preview={result.preview} diagnostics={result.diagnostics} />
+          </ErrorBoundary>
         ) : null}
         {step === stepIndex('validation') && result ? <ValidationView report={result.validation} /> : null}
         {step === stepIndex('export') && result ? (
@@ -232,13 +244,13 @@ export default function App() {
 
       <footer className="app-foot">
         <div className="row">
-          <Button disabled={step === 0} onClick={() => setStep((s) => Math.max(0, s - 1))}>
+          <Button disabled={step === 0} onClick={() => step > 0 && go(STEPS[step - 1].id)}>
             Back
           </Button>
           <Button
             variant="primary"
             disabled={step >= STEPS.length - 1 || !ready[STEPS[step + 1]?.id ?? 'export']}
-            onClick={() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}
+            onClick={() => step < STEPS.length - 1 && go(STEPS[step + 1].id)}
           >
             Next
           </Button>

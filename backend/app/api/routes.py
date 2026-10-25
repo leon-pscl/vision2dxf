@@ -250,6 +250,11 @@ def get_base_block(block_id: str):
         "panelSummary": _panel_summary(block.document),
         "validation": report.as_dict(),
         "validationStatus": report.status,
+        "referenceProfile": block.reference_profile.as_dict(),
+        "referenceEasePreset": block.reference_ease_preset,
+        "referenceMeasurementsMm": block.reference_measurements_mm,
+        "garmentDimensionsMm": block.garment_dimensions_mm,
+        "measurementDefinitions": block.measurement_definitions,
         "provenance": block.provenance,
         "influenceMapVersion": influence_map()["version"],
     }
@@ -290,7 +295,7 @@ def base_block_deltas(req: TransformRequest):
     ease = resolve_ease(settings)
     reference_ease = resolve_ease(Settings(ease_preset=block.reference_ease_preset))
     deltas = compute_deltas(
-        resolution.measurements, block.reference_measurements, ease,
+        resolution.measurements, block.reference_measurements_mm, ease,
         {"bust_mm": reference_ease.bust_mm, "waist_mm": reference_ease.waist_mm,
          "hip_mm": reference_ease.hip_mm},
     )
@@ -300,8 +305,8 @@ def base_block_deltas(req: TransformRequest):
                       "reviewed": block.reviewed},
         "referenceProfile": block.reference_profile.as_dict(),
         "referenceEasePreset": block.reference_ease_preset,
-        "baseMeasurementsMm": block.reference_measurements,
-        "garmentDimensionsMm": block.garment_dimensions,
+        "baseMeasurementsMm": block.reference_measurements_mm,
+        "garmentDimensionsMm": block.garment_dimensions_mm,
         "measurementDefinitions": block.measurement_definitions,
         "targetEaseMm": {"bust_mm": ease.bust_mm, "waist_mm": ease.waist_mm,
                          "hip_mm": ease.hip_mm, "preset": ease.preset},

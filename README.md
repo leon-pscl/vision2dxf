@@ -13,10 +13,10 @@ name.
 
 ## Before you run it
 
-**Download the GarmageSet pattern library and put it at `templates/` in this repository.**
+**Download the GarmageSet pattern library and put it at `pattern_templates/` in this repository.**
 It is 2.9 GB of pattern JSON, one file per garment set, named after the hash of its own
 contents. It is a developer prerequisite, not part of this repository: `.gitignore`
-excludes `/templates/`, and a `pre-commit` hook refuses any file over 5 MB so it cannot be
+excludes `/pattern_templates/`, and a `pre-commit` hook refuses any file over 5 MB so it cannot be
 committed by accident. Enable the hook once per clone:
 
 ```bash
@@ -35,7 +35,7 @@ read-only at `/srv/templates` for exactly that.
 ## Run it
 
 ```bash
-docker compose up --build          # http://localhost:8000
+docker compose up --build -d       # http://localhost:8000
 ```
 
 ```bash

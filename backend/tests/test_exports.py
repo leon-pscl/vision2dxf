@@ -23,14 +23,50 @@ def test_pdf_is_a_pdf(basic_result):
 def test_pdf_is_full_scale(basic_result):
     """A 100 mm drawn line must come back as 100 mm of PDF user space."""
     data = export_pdf(basic_result.document, basic_result.cutting)
-    # 1 pt = 1/72 inch; 1 mm = 72/25.4 pt. The page box must equal the A0 sheet in pt.
+    # 1 pt = 1/72 inch; 1 mm = 72/25.4 pt. Every page box must be an A0 sheet in pt,
+    # in either orientation: a panel taller than the configured one turns the sheet.
     a0_w_mm, a0_h_mm = 1189.0, 841.0
-    expected = (f"{a0_w_mm * 72 / MM_PER_INCH:.2f}", f"{a0_h_mm * 72 / MM_PER_INCH:.2f}")
+    expected = {
+        (round(a0_w_mm * 72 / MM_PER_INCH, 2), round(a0_h_mm * 72 / MM_PER_INCH, 2)),
+        (round(a0_h_mm * 72 / MM_PER_INCH, 2), round(a0_w_mm * 72 / MM_PER_INCH, 2)),
+    }
     text = data.decode("latin-1")
     media = re.findall(r"/MediaBox \[([^\]]+)\]", text)
     assert media, "PDF has no MediaBox"
-    width, height = media[0].split()[2:4]
-    assert (round(float(width), 2), round(float(height), 2)) == (float(expected[0]), float(expected[1]))
+    boxes = set()
+    for box in media:
+        width, height = box.split()[2:4]
+        boxes.add((round(float(width), 2), round(float(height), 2)))
+    assert boxes <= expected
+
+
+def test_pdf_places_every_panel_on_its_own_sheet(basic_result):
+    """Placement runs in world coordinates, so a panel lands on its sheet instead of
+    being pushed off it by the `center` it is placed by, and it is centred."""
+    from app.config import drafting_config
+    from app.export.pdf import _place
+
+    cfg = drafting_config()["paper"]
+    sheets = _place(basic_result.document, cfg, cfg["default_size"], cfg["default_orientation"])
+    assert len(sheets) == len(basic_result.document.panels)
+    turned = 0
+    for panel, sx, sy, page_w, page_h in sheets:
+        x0, y0, x1, y1 = panel.bbox()
+        cx, cy = (panel.center.x, panel.center.y) if panel.center else (0.0, 0.0)
+        left, right = x0 + cx + sx, x1 + cx + sx
+        bottom, top = y0 + cy + sy, y1 + cy + sy
+        assert 0.0 <= left and right <= page_w
+        assert 0.0 <= bottom and top <= page_h
+        assert (left + right) / 2 == pytest.approx(page_w / 2)
+        assert (bottom + top) / 2 == pytest.approx(page_h / 2)
+        # the cut line, which sits seam-allowance outside the sewing line, fits too
+        allowance = max((e.seam_allowance_mm for e in panel.edges), default=0.0)
+        assert 0.0 <= left - allowance and right + allowance <= page_w
+        assert 0.0 <= bottom - allowance and top + allowance <= page_h
+        turned += page_h > page_w
+    # The fixture panels are ~1151 mm tall, taller than A0 landscape, so the sheet
+    # must have turned to portrait rather than clipping the panel away.
+    assert turned == len(sheets)
 
 
 def test_pdf_geometry_scales_linearly(basic_result):
