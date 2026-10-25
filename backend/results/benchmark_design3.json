@@ -1,0 +1,411 @@
+{
+  "branch": "benchmark/design3",
+  "performance": {
+    "trials": {
+      "body_measurements.yaml": [
+        23.253287100000307,
+        23.303622900002665,
+        19.81033440000101,
+        17.792574300001434,
+        17.31767679999757,
+        17.391566500002227,
+        17.027423999999883,
+        17.62540430000081,
+        17.59849640000175,
+        17.607139600000664,
+        17.53140760000315,
+        17.615908599997056,
+        17.3865541999985,
+        16.937212500000896,
+        17.448187200003304,
+        17.430278799998632,
+        18.226986799996666,
+        17.792204400000628,
+        18.309943800002657,
+        18.029851899998903,
+        17.648436200001015,
+        17.66850770000019,
+        17.661835499999142,
+        18.079823200001556,
+        17.42274879999968,
+        17.70510590000049,
+        17.638210700002674,
+        17.52154679999876,
+        17.376207299999805,
+        17.897513799998706
+      ]
+    },
+    "summary": {
+      "body_measurements.yaml": {
+        "n": 30,
+        "median_seconds": 17.63180750000174,
+        "min_seconds": 16.937212500000896,
+        "max_seconds": 23.303622900002665
+      }
+    }
+  },
+  "efficiency": {
+    "files": [
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\.venv-dev\\Lib\\site-packages\\annotated_doc-0.0.5.dist-info\\entry_points.txt",
+        "bytes": 34,
+        "mb": 3.24249267578125e-05
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\.venv-dev\\Lib\\site-packages\\anyio-4.15.1.dist-info\\entry_points.txt",
+        "bytes": 39,
+        "mb": 3.719329833984375e-05
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\.venv-dev\\Lib\\site-packages\\charset_normalizer-3.5.2.dist-info\\entry_points.txt",
+        "bytes": 65,
+        "mb": 6.198883056640625e-05
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\.venv-dev\\Lib\\site-packages\\fastapi-0.162.0.dist-info\\entry_points.txt",
+        "bytes": 61,
+        "mb": 5.817413330078125e-05
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\.venv-dev\\Lib\\site-packages\\httpx-0.28.1.dist-info\\entry_points.txt",
+        "bytes": 37,
+        "mb": 3.528594970703125e-05
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\.venv-dev\\Lib\\site-packages\\idna-3.20.dist-info\\entry_points.txt",
+        "bytes": 38,
+        "mb": 3.62396240234375e-05
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\.venv-dev\\Lib\\site-packages\\numpy-2.5.4.dist-info\\entry_points.txt",
+        "bytes": 220,
+        "mb": 0.000209808349609375
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\.venv-dev\\Lib\\site-packages\\opentelemetry_api-1.45.1.dist-info\\entry_points.txt",
+        "bytes": 573,
+        "mb": 0.0005464553833007812
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\.venv-dev\\Lib\\site-packages\\pip-26.2.1.dist-info\\entry_points.txt",
+        "bytes": 84,
+        "mb": 8.0108642578125e-05
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\.venv-dev\\Lib\\site-packages\\pytest-8.3.4.dist-info\\entry_points.txt",
+        "bytes": 77,
+        "mb": 7.343292236328125e-05
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\.venv-dev\\Lib\\site-packages\\radon-6.0.1.dist-info\\entry_points.txt",
+        "bytes": 151,
+        "mb": 0.00014400482177734375
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\.venv-dev\\Lib\\site-packages\\uvicorn-0.54.0.dist-info\\entry_points.txt",
+        "bytes": 46,
+        "mb": 4.38690185546875e-05
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\backend\\app\\config\\drafting.yaml",
+        "bytes": 2086,
+        "mb": 0.0019893646240234375
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\backend\\app\\config\\measurement-semantics.yaml",
+        "bytes": 22791,
+        "mb": 0.021735191345214844
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\backend\\app\\config\\measurements.yaml",
+        "bytes": 11200,
+        "mb": 0.01068115234375
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\backend\\app\\config\\reconstruction.yaml",
+        "bytes": 9000,
+        "mb": 0.00858306884765625
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\fixtures\\body_measurements.yaml",
+        "bytes": 534,
+        "mb": 0.0005092620849609375
+      },
+      {
+        "path": "C:\\Users\\Leon\\Documents\\Github\\vision2dxf\\backend\\results\\benchmark_design3_output.pdf",
+        "bytes": 10455,
+        "mb": 0.009970664978027344
+      }
+    ],
+    "total_bytes": 57491,
+    "total_mb": 0.05482769012451172
+  },
+  "scalability": {
+    "low": {
+      "panels": 2,
+      "n": 15,
+      "median_seconds": 17.625482000003103,
+      "min_seconds": 17.144873799999914,
+      "max_seconds": 18.046828200000164,
+      "trials": [
+        18.046828200000164,
+        17.625482000003103,
+        17.485783000000083,
+        17.556731799999397,
+        17.69931329999963,
+        17.28012740000122,
+        17.239565500000026,
+        17.872042099999817,
+        17.25316450000173,
+        17.520141299999523,
+        17.665858399999706,
+        17.931175800000346,
+        17.712789799999882,
+        17.144873799999914,
+        17.816110100000515
+      ]
+    },
+    "high": {
+      "panels": 19,
+      "n": 15,
+      "median_seconds": 17.573912100000598,
+      "min_seconds": 17.14561329999924,
+      "max_seconds": 18.247755599997618,
+      "trials": [
+        17.14561329999924,
+        17.742122100000415,
+        17.360716199997114,
+        17.46235109999907,
+        17.361502399999154,
+        17.495209499997145,
+        17.720331799999258,
+        17.893144999998185,
+        17.31160799999998,
+        18.247755599997618,
+        17.92424899999969,
+        17.573912100000598,
+        17.597129800000403,
+        17.481686700000864,
+        17.589878699996916
+      ]
+    },
+    "gc": 0.9970741282421385
+  },
+  "economic": {
+    "trials": [
+      {
+        "baseline_rss_bytes": 62619648,
+        "baseline_mb": 59.71875,
+        "samples": 263,
+        "mean_rss_bytes": 64807394.79847909,
+        "mean_mb": 61.805147932509506
+      },
+      {
+        "baseline_rss_bytes": 63102976,
+        "baseline_mb": 60.1796875,
+        "samples": 253,
+        "mean_rss_bytes": 64444780.2687747,
+        "mean_mb": 61.4593317687747
+      },
+      {
+        "baseline_rss_bytes": 62664704,
+        "baseline_mb": 59.76171875,
+        "samples": 262,
+        "mean_rss_bytes": 64733246.53435115,
+        "mean_mb": 61.73443463740458
+      },
+      {
+        "baseline_rss_bytes": 63102976,
+        "baseline_mb": 60.1796875,
+        "samples": 273,
+        "mean_rss_bytes": 64747242.43223443,
+        "mean_mb": 61.74778216575091
+      },
+      {
+        "baseline_rss_bytes": 62742528,
+        "baseline_mb": 59.8359375,
+        "samples": 266,
+        "mean_rss_bytes": 64791128.54135338,
+        "mean_mb": 61.78963522086466
+      },
+      {
+        "baseline_rss_bytes": 63033344,
+        "baseline_mb": 60.11328125,
+        "samples": 264,
+        "mean_rss_bytes": 64867498.666666664,
+        "mean_mb": 61.862467447916664
+      },
+      {
+        "baseline_rss_bytes": 62730240,
+        "baseline_mb": 59.82421875,
+        "samples": 272,
+        "mean_rss_bytes": 64811730.823529415,
+        "mean_mb": 61.8092830882353
+      },
+      {
+        "baseline_rss_bytes": 63045632,
+        "baseline_mb": 60.125,
+        "samples": 261,
+        "mean_rss_bytes": 64829698.94252873,
+        "mean_mb": 61.82641882183908
+      },
+      {
+        "baseline_rss_bytes": 62726144,
+        "baseline_mb": 59.8203125,
+        "samples": 285,
+        "mean_rss_bytes": 64891030.905263156,
+        "mean_mb": 61.88490953947368
+      },
+      {
+        "baseline_rss_bytes": 62758912,
+        "baseline_mb": 59.8515625,
+        "samples": 271,
+        "mean_rss_bytes": 64761719.970479704,
+        "mean_mb": 61.76158902214022
+      },
+      {
+        "baseline_rss_bytes": 62590976,
+        "baseline_mb": 59.69140625,
+        "samples": 261,
+        "mean_rss_bytes": 64634644.59770115,
+        "mean_mb": 61.64040050287356
+      },
+      {
+        "baseline_rss_bytes": 63041536,
+        "baseline_mb": 60.12109375,
+        "samples": 268,
+        "mean_rss_bytes": 64512473.79104478,
+        "mean_mb": 61.52388934235075
+      },
+      {
+        "baseline_rss_bytes": 62648320,
+        "baseline_mb": 59.74609375,
+        "samples": 267,
+        "mean_rss_bytes": 64761779.29588015,
+        "mean_mb": 61.76164559925093
+      },
+      {
+        "baseline_rss_bytes": 63029248,
+        "baseline_mb": 60.109375,
+        "samples": 271,
+        "mean_rss_bytes": 64511002.4501845,
+        "mean_mb": 61.52248616236162
+      },
+      {
+        "baseline_rss_bytes": 62627840,
+        "baseline_mb": 59.7265625,
+        "samples": 262,
+        "mean_rss_bytes": 64795921.58778626,
+        "mean_mb": 61.794206226145036
+      },
+      {
+        "baseline_rss_bytes": 63025152,
+        "baseline_mb": 60.10546875,
+        "samples": 273,
+        "mean_rss_bytes": 64635990.27106227,
+        "mean_mb": 61.641683836996336
+      },
+      {
+        "baseline_rss_bytes": 62607360,
+        "baseline_mb": 59.70703125,
+        "samples": 274,
+        "mean_rss_bytes": 64866916.90510949,
+        "mean_mb": 61.86191263686131
+      },
+      {
+        "baseline_rss_bytes": 63074304,
+        "baseline_mb": 60.15234375,
+        "samples": 262,
+        "mean_rss_bytes": 64794717.80152672,
+        "mean_mb": 61.79305820610687
+      },
+      {
+        "baseline_rss_bytes": 62734336,
+        "baseline_mb": 59.828125,
+        "samples": 269,
+        "mean_rss_bytes": 64766926.51301115,
+        "mean_mb": 61.76655436802974
+      },
+      {
+        "baseline_rss_bytes": 63053824,
+        "baseline_mb": 60.1328125,
+        "samples": 268,
+        "mean_rss_bytes": 64770552.358208954,
+        "mean_mb": 61.77001224347015
+      },
+      {
+        "baseline_rss_bytes": 62668800,
+        "baseline_mb": 59.765625,
+        "samples": 271,
+        "mean_rss_bytes": 64707776.708487086,
+        "mean_mb": 61.71014471863469
+      },
+      {
+        "baseline_rss_bytes": 62988288,
+        "baseline_mb": 60.0703125,
+        "samples": 273,
+        "mean_rss_bytes": 64758930.28571428,
+        "mean_mb": 61.75892857142857
+      },
+      {
+        "baseline_rss_bytes": 62660608,
+        "baseline_mb": 59.7578125,
+        "samples": 262,
+        "mean_rss_bytes": 64645807.877862595,
+        "mean_mb": 61.65104663645038
+      },
+      {
+        "baseline_rss_bytes": 62996480,
+        "baseline_mb": 60.078125,
+        "samples": 262,
+        "mean_rss_bytes": 64752178.80916031,
+        "mean_mb": 61.75248986164122
+      },
+      {
+        "baseline_rss_bytes": 62726144,
+        "baseline_mb": 59.8203125,
+        "samples": 266,
+        "mean_rss_bytes": 64722127.879699245,
+        "mean_mb": 61.72383106203007
+      },
+      {
+        "baseline_rss_bytes": 63012864,
+        "baseline_mb": 60.09375,
+        "samples": 264,
+        "mean_rss_bytes": 64760769.93939394,
+        "mean_mb": 61.76068300189394
+      },
+      {
+        "baseline_rss_bytes": 62685184,
+        "baseline_mb": 59.78125,
+        "samples": 266,
+        "mean_rss_bytes": 64704742.977443606,
+        "mean_mb": 61.707251527255636
+      },
+      {
+        "baseline_rss_bytes": 63029248,
+        "baseline_mb": 60.109375,
+        "samples": 274,
+        "mean_rss_bytes": 64819185.05109489,
+        "mean_mb": 61.81639199361314
+      },
+      {
+        "baseline_rss_bytes": 62693376,
+        "baseline_mb": 59.7890625,
+        "samples": 275,
+        "mean_rss_bytes": 64856659.78181818,
+        "mean_mb": 61.85213068181818
+      },
+      {
+        "baseline_rss_bytes": 63057920,
+        "baseline_mb": 60.13671875,
+        "samples": 264,
+        "mean_rss_bytes": 64738971.15151515,
+        "mean_mb": 61.73989405776515
+      }
+    ],
+    "average_mb": 61.74098802939622,
+    "average_baseline_mb": 59.93776041666667,
+    "n": 30
+  }
+}
