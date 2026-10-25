@@ -78,7 +78,7 @@ import psutil
 
 from app.config import drafting_config
 from app.drafting.ease import Settings
-from app.drafting.semantics import registry
+from app.drafting.semantics import default_confirmations
 from app.export.pdf import export_pdf
 from app.drafting.pipeline import draft, resolve_semantics
 
@@ -113,13 +113,6 @@ def git_branch() -> str:
 
 def _confirmations() -> dict[str, str]:
     return default_confirmations()
-
-
-def _confirmations() -> dict[str, str]:
-    reg = registry()
-    return {name: f.candidates[0].id for name, f in reg.fields.items()
-            if f.status == "ambiguous"}
-
 
 def _load_resolution(name: str):
     text = (FIXTURES / name).read_text(encoding="utf-8")
@@ -200,30 +193,40 @@ def efficiency() -> dict:
 
 
 def scalability() -> dict:
+    assert SCALABILITY_LOW != SCALABILITY_HIGH, "scalability fixtures must differ"
     low_times: list[float] = []
     high_times: list[float] = []
-    print(f"  scalability low  (2 panels, {SCALABILITY_REPEATS} trials)")
+    low_panels: int | None = None
+    high_panels: int | None = None
+    print(f"  scalability low  ({SCALABILITY_REPEATS} trials)")
     for i in range(SCALABILITY_REPEATS):
-        elapsed, _ = _one_generation(SCALABILITY_LOW)
+        elapsed, result = _one_generation(SCALABILITY_LOW)
         low_times.append(elapsed)
+        if low_panels is None:
+            low_panels = len(result.document.panels)
         print(f"    trial {i + 1:>2}/{SCALABILITY_REPEATS}: {elapsed:.6f} s", flush=True)
-    print(f"  scalability high (19 panels, {SCALABILITY_REPEATS} trials)")
+    print(f"  scalability high ({SCALABILITY_REPEATS} trials)")
     for i in range(SCALABILITY_REPEATS):
-        elapsed, _ = _one_generation(SCALABILITY_HIGH)
+        elapsed, result = _one_generation(SCALABILITY_HIGH)
         high_times.append(elapsed)
+        if high_panels is None:
+            high_panels = len(result.document.panels)
         print(f"    trial {i + 1:>2}/{SCALABILITY_REPEATS}: {elapsed:.6f} s", flush=True)
+
+    if low_panels == high_panels:
+        print(f"  WARNING: low and high panel counts are equal ({low_panels})")
 
     low_median = statistics.median(low_times)
     high_median = statistics.median(high_times)
     gc = high_median / low_median if low_median else float("inf")
 
     return {
-        "low": {"panels": 2, "n": len(low_times),
+        "low": {"panels": low_panels, "n": len(low_times),
                 "median_seconds": low_median,
                 "min_seconds": min(low_times),
                 "max_seconds": max(low_times),
                 "trials": low_times},
-        "high": {"panels": 19, "n": len(high_times),
+        "high": {"panels": high_panels, "n": len(high_times),
                  "median_seconds": high_median,
                  "min_seconds": min(high_times),
                  "max_seconds": max(high_times),
@@ -279,6 +282,9 @@ def economic() -> dict:
 def _write_results(branch, perf, eff, scal, econ) -> None:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
+    low_level = f"low_{scal['low']['panels']}_panels"
+    high_level = f"high_{scal['high']['panels']}_panels"
+
     rows: list[dict] = []
     for name, times in perf["trials"].items():
         for i, v in enumerate(times):
@@ -289,11 +295,11 @@ def _write_results(branch, perf, eff, scal, econ) -> None:
             })
     for i, t in enumerate(scal["low"]["trials"]):
         rows.append({"branch": branch, "record_type": "raw", "metric": "scalability",
-                     "fixture": SCALABILITY_LOW, "level": "low_2_panels", "trial": i,
+                     "fixture": SCALABILITY_LOW, "level": low_level, "trial": i,
                      "value": t, "unit": "seconds", "statistic": ""})
     for i, t in enumerate(scal["high"]["trials"]):
         rows.append({"branch": branch, "record_type": "raw", "metric": "scalability",
-                     "fixture": SCALABILITY_HIGH, "level": "high_19_panels", "trial": i,
+                     "fixture": SCALABILITY_HIGH, "level": high_level, "trial": i,
                      "value": t, "unit": "seconds", "statistic": ""})
     for i, t in enumerate(econ["trials"]):
         rows.append({"branch": branch, "record_type": "raw", "metric": "economic",
@@ -317,11 +323,11 @@ def _write_results(branch, perf, eff, scal, econ) -> None:
                  "fixture": "", "level": "", "trial": "", "value": eff["total_mb"],
                  "unit": "MB", "statistic": "total"})
     rows.append({"branch": branch, "record_type": "summary", "metric": "scalability",
-                 "fixture": SCALABILITY_LOW, "level": "low_2_panels", "trial": "",
+                 "fixture": SCALABILITY_LOW, "level": low_level, "trial": "",
                  "value": scal["low"]["median_seconds"], "unit": "seconds",
                  "statistic": "median"})
     rows.append({"branch": branch, "record_type": "summary", "metric": "scalability",
-                 "fixture": SCALABILITY_HIGH, "level": "high_19_panels", "trial": "",
+                 "fixture": SCALABILITY_HIGH, "level": high_level, "trial": "",
                  "value": scal["high"]["median_seconds"], "unit": "seconds",
                  "statistic": "median"})
     rows.append({"branch": branch, "record_type": "summary", "metric": "scalability",
@@ -374,8 +380,8 @@ def main() -> None:
 
     scal = scalability()
     print("\nScalability:")
-    print(f"  low  (2 panels):  median={scal['low']['median_seconds']:.6f} s")
-    print(f"  high (19 panels): median={scal['high']['median_seconds']:.6f} s")
+    print(f"  low  ({scal['low']['panels']} panels):  median={scal['low']['median_seconds']:.6f} s")
+    print(f"  high ({scal['high']['panels']} panels): median={scal['high']['median_seconds']:.6f} s")
     print(f"  GC = {scal['gc']:.6f}")
 
     econ = economic()
