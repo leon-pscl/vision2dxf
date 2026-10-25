@@ -1,0 +1,52 @@
+{
+  "Design name": "Design 1 - Formula-Based Drafting",
+  "Included-file count": 14,
+  "Total included SLOC": 1980,
+  "Weighted mean MI": 36.863240580129414,
+  "Unweighted mean MI": 52.221720529577894,
+  "Radon version": "6.0.1",
+  "Python version": "3.14.8 | packaged by Anaconda, Inc. | (main, Oct  1 2026, 20:25:10) [MSC v.1942 64 bit (AMD64)]",
+  "Multiline-string setting": true,
+  "Measurement timestamp": "2026-10-25T14:10:11+00:00",
+  "Git commit": "9c8fcb784f5dd28bca7a0dd5d4c5f05f6959aab5",
+  "Working-tree dirty status": true,
+  "Manifest used": "maintainability_manifest_design1.json",
+  "Exclusions": [
+    {
+      "path": "app/api",
+      "reason": "Shared web application/API infrastructure"
+    },
+    {
+      "path": "app/main.py",
+      "reason": "Web application entry point"
+    },
+    {
+      "path": "app/rendering",
+      "reason": "Preview/rendering functionality outside boundary"
+    },
+    {
+      "path": "app/export",
+      "reason": "Export and print-layout functionality outside boundary"
+    },
+    {
+      "path": "app/serialization",
+      "reason": "Shared output serialization outside pattern geometry boundary"
+    },
+    {
+      "path": "app/schemas",
+      "reason": "Shared schema definitions for API/export"
+    },
+    {
+      "path": "app/drafting/__init__.py",
+      "reason": "Empty package marker"
+    },
+    {
+      "path": "tests, benchmarks, evaluation scripts",
+      "reason": "Excluded by policy"
+    },
+    {
+      "path": "__pycache__, app/static",
+      "reason": "Generated code and web assets"
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "design": "Design 1 - Formula-Based Drafting",
+  "included": [
+    {
+      "path": "app/config/__init__.py",
+      "reason": "Configuration loader for drafting constants"
+    },
+    {
+      "path": "app/drafting/measurements.py",
+      "reason": "Parse and confirm body measurements entering the boundary"
+    },
+    {
+      "path": "app/drafting/semantics.py",
+      "reason": "Resolve semantics, derived measurements, field definitions"
+    },
+    {
+      "path": "app/drafting/ease.py",
+      "reason": "Ease settings used by formula drafting"
+    },
+    {
+      "path": "app/drafting/geometry.py",
+      "reason": "Pattern document geometry primitives"
+    },
+    {
+      "path": "app/drafting/curves.py",
+      "reason": "Curve construction helpers"
+    },
+    {
+      "path": "app/drafting/cutting.py",
+      "reason": "Cutting-line generation"
+    },
+    {
+      "path": "app/drafting/derived_dimensions.py",
+      "reason": "Derived dimension calculations"
+    },
+    {
+      "path": "app/drafting/landmarks.py",
+      "reason": "Landmark derivation helpers"
+    },
+    {
+      "path": "app/drafting/panels.py",
+      "reason": "Panel geometry construction"
+    },
+    {
+      "path": "app/drafting/rules.py",
+      "reason": "Drafting rules and formula constraints"
+    },
+    {
+      "path": "app/drafting/stitches.py",
+      "reason": "Stitch definitions and seam pairing"
+    },
+    {
+      "path": "app/drafting/pipeline.py",
+      "reason": "Top-level draft() orchestration"
+    },
+    {
+      "path": "app/validation/geometry_checks.py",
+      "reason": "Geometric validation of generated pattern"
+    }
+  ],
+  "exclusions": [
+    {
+      "path": "app/api",
+      "reason": "Shared web application/API infrastructure"
+    },
+    {
+      "path": "app/main.py",
+      "reason": "Web application entry point"
+    },
+    {
+      "path": "app/rendering",
+      "reason": "Preview/rendering functionality outside boundary"
+    },
+    {
+      "path": "app/export",
+      "reason": "Export and print-layout functionality outside boundary"
+    },
+    {
+      "path": "app/serialization",
+      "reason": "Shared output serialization outside pattern geometry boundary"
+    },
+    {
+      "path": "app/schemas",
+      "reason": "Shared schema definitions for API/export"
+    },
+    {
+      "path": "app/drafting/__init__.py",
+      "reason": "Empty package marker"
+    },
+    {
+      "path": "tests, benchmarks, evaluation scripts",
+      "reason": "Excluded by policy"
+    },
+    {
+      "path": "__pycache__, app/static",
+      "reason": "Generated code and web assets"
+    }
+  ]
+}

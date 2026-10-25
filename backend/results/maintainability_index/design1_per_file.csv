@@ -1,0 +1,15 @@
+Design name,Relative file path,Inclusion reason,SLOC,File-level MI,SLOC weight,Contribution to weighted mean
+Design 1 - Formula-Based Drafting,app/config/__init__.py,Configuration loader for drafting constants,20,86.3114110282837,0.010101010101010102,0.8718324346291283
+Design 1 - Formula-Based Drafting,app/drafting/curves.py,Curve construction helpers,152,19.259593888342632,0.07676767676767676,1.4785142782970102
+Design 1 - Formula-Based Drafting,app/drafting/cutting.py,Cutting-line generation,40,76.32820631567502,0.020202020202020204,1.5419839659732326
+Design 1 - Formula-Based Drafting,app/drafting/derived_dimensions.py,Derived dimension calculations,169,54.18365443071919,0.08535353535353535,4.624766464036133
+Design 1 - Formula-Based Drafting,app/drafting/ease.py,Ease settings used by formula drafting,44,59.0268243063934,0.022222222222222223,1.311707206808742
+Design 1 - Formula-Based Drafting,app/drafting/geometry.py,Pattern document geometry primitives,133,35.730665652840756,0.06717171717171717,2.4000901675898083
+Design 1 - Formula-Based Drafting,app/drafting/landmarks.py,Landmark derivation helpers,108,53.49455239018887,0.05454545454545454,2.9178846758284838
+Design 1 - Formula-Based Drafting,app/drafting/measurements.py,Parse and confirm body measurements entering the boundary,106,50.49044697886153,0.05353535353535353,2.7030239291713745
+Design 1 - Formula-Based Drafting,app/drafting/panels.py,Panel geometry construction,138,50.528869669678855,0.0696969696969697,3.5217090981897385
+Design 1 - Formula-Based Drafting,app/drafting/pipeline.py,Top-level draft() orchestration,103,58.337938098573126,0.05202020202020202,3.0347513253298137
+Design 1 - Formula-Based Drafting,app/drafting/rules.py,Drafting rules and formula constraints,109,56.331871348277936,0.05505050505050505,3.1010979681627755
+Design 1 - Formula-Based Drafting,app/drafting/semantics.py,"Resolve semantics, derived measurements, field definitions",578,13.570518123694733,0.2919191919191919,3.9614946845937147
+Design 1 - Formula-Based Drafting,app/drafting/stitches.py,Stitch definitions and seam pairing,26,84.06377570597324,0.013131313131313131,1.1038677617956083
+Design 1 - Formula-Based Drafting,app/validation/geometry_checks.py,Geometric validation of generated pattern,254,33.44575947658747,0.12828282828282828,4.290516619723848
