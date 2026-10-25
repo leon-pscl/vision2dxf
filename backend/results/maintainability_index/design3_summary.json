@@ -1,0 +1,64 @@
+{
+  "Design name": "Design 3 - Anthropometric Surface Reconstruction and Constrained Mesh Flattening",
+  "Included-file count": 25,
+  "Total included SLOC": 3649,
+  "Weighted mean MI": 42.254351190139104,
+  "Unweighted mean MI": 55.42421157881734,
+  "Radon version": "6.0.1",
+  "Python version": "3.14.8 | packaged by Anaconda, Inc. | (main, Oct  1 2026, 20:25:10) [MSC v.1942 64 bit (AMD64)]",
+  "Multiline-string setting": true,
+  "Measurement timestamp": "2026-10-25T12:06:11+00:00",
+  "Git commit": "fc8471239de4c647eb10b3e69628b0703dc408d2",
+  "Working-tree dirty status": true,
+  "Manifest used": "maintainability_manifest_design3.json",
+  "Exclusions": [
+    {
+      "path": "app/api",
+      "reason": "Shared web application/API infrastructure"
+    },
+    {
+      "path": "app/main.py",
+      "reason": "Web application entry point"
+    },
+    {
+      "path": "app/rendering",
+      "reason": "Preview/rendering functionality outside boundary"
+    },
+    {
+      "path": "app/export",
+      "reason": "Export and print-layout functionality outside boundary"
+    },
+    {
+      "path": "app/serialization",
+      "reason": "Shared output serialization outside pattern geometry boundary"
+    },
+    {
+      "path": "app/schemas",
+      "reason": "Shared schema definitions for API/export"
+    },
+    {
+      "path": "app/placement.py",
+      "reason": "Unused alternative placement implementation"
+    },
+    {
+      "path": "app/base_block (pycache only)",
+      "reason": "No source; generated/unused base-block transformation implementation"
+    },
+    {
+      "path": "app/transformation (pycache only)",
+      "reason": "No source; generated/unused alternative implementation"
+    },
+    {
+      "path": "app/drafting/__init__.py and other empty __init__.py",
+      "reason": "Empty or import-only package markers"
+    },
+    {
+      "path": "tests, benchmarks, evaluation scripts",
+      "reason": "Excluded by policy"
+    },
+    {
+      "path": "__pycache__, app/static",
+      "reason": "Generated code and web assets"
+    }
+  ]
+}
