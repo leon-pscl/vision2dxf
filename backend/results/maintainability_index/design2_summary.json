@@ -1,0 +1,60 @@
+{
+  "Design name": "Design 2 - Parametric Base-Block Transformation",
+  "Included-file count": 13,
+  "Total included SLOC": 1822,
+  "Weighted mean MI": 38.5907332935717,
+  "Unweighted mean MI": 59.76914125511449,
+  "Radon version": "6.0.1",
+  "Python version": "3.14.8 | packaged by Anaconda, Inc. | (main, Oct  1 2026, 20:25:10) [MSC v.1942 64 bit (AMD64)]",
+  "Multiline-string setting": true,
+  "Measurement timestamp": "2026-10-25T14:03:58+00:00",
+  "Git commit": "1982d7ecba77e19e0c700bbcea9364b20b34b73a",
+  "Working-tree dirty status": true,
+  "Manifest used": "maintainability_manifest_design2.json",
+  "Exclusions": [
+    {
+      "path": "app/api",
+      "reason": "Shared web application/API infrastructure"
+    },
+    {
+      "path": "app/main.py",
+      "reason": "Web application entry point"
+    },
+    {
+      "path": "app/rendering",
+      "reason": "Preview/rendering functionality outside boundary"
+    },
+    {
+      "path": "app/export",
+      "reason": "Export and print-layout functionality outside boundary"
+    },
+    {
+      "path": "app/serialization",
+      "reason": "Shared output serialization outside pattern geometry boundary"
+    },
+    {
+      "path": "app/schemas",
+      "reason": "Shared schema definitions for API/export"
+    },
+    {
+      "path": "app/drafting/__init__.py",
+      "reason": "Empty package marker"
+    },
+    {
+      "path": "app/transformation/__init__.py",
+      "reason": "Empty package marker"
+    },
+    {
+      "path": "app/base_block/__init__.py",
+      "reason": "Import-only package marker"
+    },
+    {
+      "path": "app/config/drafting.yaml and transformation.yaml",
+      "reason": "Config data files, not Python source"
+    },
+    {
+      "path": "tests, benchmarks, evaluation scripts",
+      "reason": "Excluded by policy"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+Design name,Relative file path,Inclusion reason,SLOC,File-level MI,SLOC weight,Contribution to weighted mean
+Design 2 - Parametric Base-Block Transformation,app/base_block/loader.py,Base-block loading and interpretation,232,46.4221949070212,0.12733260153677278,5.9110588465581335
+Design 2 - Parametric Base-Block Transformation,app/base_block/measurements.py,Default confirmations for ambiguous measurement fields,10,99.27412354807551,0.005488474204171241,0.5448634662353211
+Design 2 - Parametric Base-Block Transformation,app/config/__init__.py,Configuration loader for drafting and transformation constants used by generation,22,84.3765873337476,0.012074643249176729,1.0188171906380061
+Design 2 - Parametric Base-Block Transformation,app/drafting/curves.py,Curve construction helpers required by cutting lines,89,47.712621917239765,0.04884742041712404,2.3306385019946974
+Design 2 - Parametric Base-Block Transformation,app/drafting/cutting.py,Cutting-line generation over pattern panels,40,76.32820631567502,0.021953896816684963,1.6757015656569707
+Design 2 - Parametric Base-Block Transformation,app/drafting/ease.py,Ease settings used by transformation envelope and geometry updates,42,64.40324737601297,0.02305159165751921,1.4845973599300464
+Design 2 - Parametric Base-Block Transformation,app/drafting/geometry.py,Pattern document geometry primitives used by generation,180,40.69093662596406,0.09879253567508232,4.019960808273069
+Design 2 - Parametric Base-Block Transformation,app/drafting/measurements.py,Parse and confirm body measurements entering the boundary,106,50.49044697886153,0.05817782656421515,2.9374244674859065
+Design 2 - Parametric Base-Block Transformation,app/drafting/semantics.py,"Resolve semantics, derived measurements, and field definitions",578,13.570518123694733,0.3172338090010977,4.305027154498109
+Design 2 - Parametric Base-Block Transformation,app/transformation/constraints.py,Transformation envelope constraints,36,77.75174074294756,0.019758507135016465,1.5362583242294796
+Design 2 - Parametric Base-Block Transformation,app/transformation/deltas.py,Measurement differences between reference and target,46,82.93831112673908,0.025246981339187707,2.0939419933205254
+Design 2 - Parametric Base-Block Transformation,app/transformation/pipeline.py,Top-level resolve_semantics/transform orchestration,184,59.68140237388723,0.10098792535675083,6.027101008120336
+Design 2 - Parametric Base-Block Transformation,app/validation/geometry_checks.py,Geometric validation of generated pattern,257,33.35849894662204,0.14105378704720087,4.7053426066311

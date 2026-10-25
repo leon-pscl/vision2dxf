@@ -1,0 +1,103 @@
+{
+  "design": "Design 2 - Parametric Base-Block Transformation",
+  "included": [
+    {
+      "path": "app/config/__init__.py",
+      "reason": "Configuration loader for drafting and transformation constants used by generation"
+    },
+    {
+      "path": "app/drafting/measurements.py",
+      "reason": "Parse and confirm body measurements entering the boundary"
+    },
+    {
+      "path": "app/drafting/semantics.py",
+      "reason": "Resolve semantics, derived measurements, and field definitions"
+    },
+    {
+      "path": "app/drafting/ease.py",
+      "reason": "Ease settings used by transformation envelope and geometry updates"
+    },
+    {
+      "path": "app/drafting/geometry.py",
+      "reason": "Pattern document geometry primitives used by generation"
+    },
+    {
+      "path": "app/drafting/curves.py",
+      "reason": "Curve construction helpers required by cutting lines"
+    },
+    {
+      "path": "app/drafting/cutting.py",
+      "reason": "Cutting-line generation over pattern panels"
+    },
+    {
+      "path": "app/base_block/loader.py",
+      "reason": "Base-block loading and interpretation"
+    },
+    {
+      "path": "app/base_block/measurements.py",
+      "reason": "Default confirmations for ambiguous measurement fields"
+    },
+    {
+      "path": "app/transformation/deltas.py",
+      "reason": "Measurement differences between reference and target"
+    },
+    {
+      "path": "app/transformation/constraints.py",
+      "reason": "Transformation envelope constraints"
+    },
+    {
+      "path": "app/transformation/pipeline.py",
+      "reason": "Top-level resolve_semantics/transform orchestration"
+    },
+    {
+      "path": "app/validation/geometry_checks.py",
+      "reason": "Geometric validation of generated pattern"
+    }
+  ],
+  "exclusions": [
+    {
+      "path": "app/api",
+      "reason": "Shared web application/API infrastructure"
+    },
+    {
+      "path": "app/main.py",
+      "reason": "Web application entry point"
+    },
+    {
+      "path": "app/rendering",
+      "reason": "Preview/rendering functionality outside boundary"
+    },
+    {
+      "path": "app/export",
+      "reason": "Export and print-layout functionality outside boundary"
+    },
+    {
+      "path": "app/serialization",
+      "reason": "Shared output serialization outside pattern geometry boundary"
+    },
+    {
+      "path": "app/schemas",
+      "reason": "Shared schema definitions for API/export"
+    },
+    {
+      "path": "app/drafting/__init__.py",
+      "reason": "Empty package marker"
+    },
+    {
+      "path": "app/transformation/__init__.py",
+      "reason": "Empty package marker"
+    },
+    {
+      "path": "app/base_block/__init__.py",
+      "reason": "Import-only package marker"
+    },
+    {
+      "path": "app/config/drafting.yaml and transformation.yaml",
+      "reason": "Config data files, not Python source"
+    },
+    {
+      "path": "tests, benchmarks, evaluation scripts",
+      "reason": "Excluded by policy"
+    }
+  ]
+}
