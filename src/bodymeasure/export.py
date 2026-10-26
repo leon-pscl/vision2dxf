@@ -199,6 +199,8 @@ def write_all(
     measurements: MeasurementSet,
     profile: str,
     calibration: Calibration | None,
+    *,
+    confirmed: bool = False,
 ) -> Gate:
     """Write the report and extended files always, the body file only if it may be.
 
@@ -221,7 +223,7 @@ def write_all(
         folder / EXTENDED_FILE,
         yaml.safe_dump(extended_document(measurements), sort_keys=False),
     )
-    if gate.ok:
+    if gate.ok and confirmed:
         write_atomic(
             folder / BODY_FILE,
             yaml.safe_dump(body_document(measurements, session_id), sort_keys=False),

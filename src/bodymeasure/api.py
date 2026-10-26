@@ -431,6 +431,13 @@ async def confirm_session(session_id: str) -> dict[str, object]:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     store.drop_debug(session_id)
+    # The pattern-ready file is only written once an operator has confirmed the
+    # review (brief 15.1); confirming is what makes body_measurements.yaml appear.
+    try:
+        measurements = measure_session(session_id)
+        export(session_id, measurements)
+    except (FileNotFoundError, ValueError):
+        pass
     session = store.get_session(session_id) or {}
     return {
         "status": session.get("status"),

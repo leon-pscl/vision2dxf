@@ -624,10 +624,12 @@ def export(session_id: str, measurements: MeasurementSet) -> Gate:
 
     """
     subject = load_subject(session_id)
+    confirmed = (store.get_session(session_id) or {}).get("status") in ("confirmed", "exported")
     return write_all(
         session_dir(session_id),
         session_id,
         measurements,
         subject.profile,
         load_calibration(),
+        confirmed=confirmed,
     )

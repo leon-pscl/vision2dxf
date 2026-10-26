@@ -53,7 +53,7 @@ accepts.
 ## Run it (Docker — nothing else to install)
 
 ```bash
-docker compose up --build        # http://localhost:8000
+docker compose up --build        # http://localhost:8080
 docker compose down
 ```
 
@@ -90,7 +90,7 @@ ultralytics/torch wheels target at M3. So it gets its own env:
 conda env create -f environment.yml    # python 3.11 + requirements.txt
 conda activate bodymeasure
 ./scripts/check.sh                     # ruff check + pytest
-uvicorn bodymeasure.api:app --reload   # http://localhost:8000
+uvicorn bodymeasure.api:app --reload   # http://localhost:8080
 ```
 
 After changing `requirements.txt`: `conda env update -f environment.yml`.
@@ -224,14 +224,14 @@ frames.
 ## Capturing from another machine
 
 The camera is opened by the browser, so the station PC browsing to
-`http://localhost:8000` needs nothing extra. Browsing to the station by IP from
+`http://localhost:8080` needs nothing extra. Browsing to the station by IP from
 another machine does: browsers refuse `getUserMedia` on a plain-http origin that
 is not localhost, and the *Start camera* button will report the refusal. Three
 ways round it, cheapest first:
 
 1. **Upload instead.** Every capture button has an upload beside it, so photos
    taken on a phone work without any of this.
-2. **A tunnel.** `ssh -L 8000:localhost:8000 user@station` makes the station
+2. **A tunnel.** `ssh -L 8080:localhost:8080 user@station` makes the station
    look like localhost to the other machine, and nothing changes in the app.
 3. **HTTPS.** Generate a certificate and pass it to uvicorn:
 
@@ -505,7 +505,7 @@ is recorded, no manual reference value will be added to this dataset, and
 - **No real capture has been measured.** Every test uses drawn or rendered
   figures. The pose-gate thresholds have never met a real A-pose.
 - Webcam capture works through the container, because the *browser* opens the
-  camera, not the server: open `http://localhost:8000` on the machine with the
+  camera, not the server: open `http://localhost:8080` on the machine with the
   webcam. Reaching the station from another machine over the LAN does not work,
   though - `getUserMedia` is refused on a plain-http origin that is not
   localhost. See *Capturing from another machine* below.

@@ -43,6 +43,6 @@ RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/ent
 
 COPY . .
 
-EXPOSE 8000
+EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["uvicorn", "bodymeasure.api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "bodymeasure.api:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -1228,6 +1228,10 @@ function initReview() {
         `confirmed · photographs deleted after ${body.images_purge_after}`,
         "ok",
       );
+      const download = el("download-body");
+      if (download && download.getAttribute("href") && download.getAttribute("href") !== "#") {
+        download.click();
+      }
     }
   });
 
